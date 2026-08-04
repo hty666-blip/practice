@@ -720,12 +720,13 @@ struct RootView: View {
                 .tabItem { Label("饮食", systemImage: "fork.knife") }
             NavigationStack { WorkoutHomeView() }
                 .tabItem { Label("训练", systemImage: "dumbbell.fill") }
+            NavigationStack { CoachChatView() }
+                .tabItem { Label("AI 教练", systemImage: "sparkles") }
             NavigationStack { ProgressDashboardView() }
                 .tabItem { Label("进度", systemImage: "chart.line.uptrend.xyaxis") }
-            NavigationStack { SettingsView() }
-                .tabItem { Label("我的", systemImage: "person.crop.circle") }
         }
         .tint(.green)
+        .dynamicTypeSize(.xSmall ... .large)
     }
 }
 
@@ -739,7 +740,9 @@ struct TodayView: View {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("今天，先完成一件事")
-                        .font(.largeTitle.bold())
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
                     Text("不追求完美；按计划出现，就在变强。")
                         .foregroundStyle(.secondary)
                 }
@@ -815,8 +818,8 @@ struct TodayView: View {
         .navigationTitle("练了么")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink { CoachChatView() } label: {
-                    Image(systemName: "sparkles")
+                NavigationLink { SettingsView() } label: {
+                    Image(systemName: "gearshape")
                 }
             }
         }
@@ -1664,7 +1667,10 @@ struct CoachChatView: View {
         }
         .navigationTitle("AI 教练")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                NavigationLink { AISettingsView() } label: {
+                    Image(systemName: "slider.horizontal.3")
+                }
                 Button("清空", role: .destructive) { store.clearChat() }
                     .disabled(store.chatMessages.isEmpty)
             }

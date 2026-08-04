@@ -151,6 +151,8 @@
 				CODE_SIGN_ENTITLEMENTS = GymCoach/GymCoach.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "练了么";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "用于读取当天步数，帮助记录日常活动量。";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "GymCoach 不会写入健康数据。";
@@ -171,6 +173,8 @@
 				CODE_SIGN_ENTITLEMENTS = GymCoach/GymCoach.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "练了么";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "用于读取当天步数，帮助记录日常活动量。";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "GymCoach 不会写入健康数据。";
