@@ -5,6 +5,7 @@ import HealthKit
 import Security
 import Charts
 import UIKit
+import WidgetKit
 
 @main
 struct GymCoachApp: App {
@@ -105,18 +106,166 @@ enum BiologicalSex: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum FitnessGoal: String, Codable, CaseIterable, Identifiable {
+    case fatLoss = "减脂"
+    case maintain = "维持"
+    case muscleGain = "增肌"
+
+    var id: String { rawValue }
+
+    var calorieAdjustment: Double {
+        switch self {
+        case .fatLoss: return -0.15
+        case .maintain: return 0
+        case .muscleGain: return 0.10
+        }
+    }
+
+    var proteinPerKilogram: Double {
+        switch self {
+        case .fatLoss: return 1.8
+        case .maintain: return 1.6
+        case .muscleGain: return 1.8
+        }
+    }
+}
+
+enum ActivityLevel: String, Codable, CaseIterable, Identifiable {
+    case sedentary = "久坐，日常走动较少"
+    case light = "轻度活动，每周训练 1–2 次"
+    case moderate = "中等活动，每周训练 3–5 次"
+    case high = "高活动量，每周训练 6 次以上"
+
+    var id: String { rawValue }
+
+    var multiplier: Double {
+        switch self {
+        case .sedentary: return 1.2
+        case .light: return 1.375
+        case .moderate: return 1.55
+        case .high: return 1.725
+        }
+    }
+}
+
+enum TrainingExperience: String, Codable, CaseIterable, Identifiable {
+    case beginner = "新手（规律训练少于 6 个月）"
+    case intermediate = "有基础（能稳定完成常见动作）"
+    case experienced = "进阶（有明确训练记录）"
+
+    var id: String { rawValue }
+}
+
+enum EquipmentAccess: String, Codable, CaseIterable, Identifiable {
+    case gym = "健身房器械齐全"
+    case basicHome = "家用哑铃/弹力带"
+    case bodyweight = "徒手为主"
+
+    var id: String { rawValue }
+}
+
+struct NutritionTargets {
+    let calories: Int
+    let protein: Int
+    let carbs: Int
+    let fat: Int
+    let sourceText: String
+}
+
 struct FitnessProfile: Codable {
     var heightCentimeters = 185.0
     var age = 23
     var sex: BiologicalSex = .male
     var startingWeight = 100.0
     var currentWeightGoal = 75.0
+    var fitnessGoal: FitnessGoal = .fatLoss
+    var activityLevel: ActivityLevel = .moderate
+    var trainingExperience: TrainingExperience = .beginner
+    var equipmentAccess: EquipmentAccess = .gym
+    var trainingDaysPerWeek = 5
+    var preferredSessionMinutes = 60
+    var posturePriority = true
+    var usesRecommendedNutrition = true
+    var onboardingCompleted = false
     var dailyCaloriesGoal = 2200
     var dailyProteinGoal = 150
     var dailyStepsGoal = 8000
     var dailyWaterGoal = 8
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case heightCentimeters, age, sex, startingWeight, currentWeightGoal
+        case fitnessGoal, activityLevel, trainingExperience, equipmentAccess
+        case trainingDaysPerWeek, preferredSessionMinutes, posturePriority
+        case usesRecommendedNutrition, onboardingCompleted
+        case dailyCaloriesGoal, dailyProteinGoal, dailyStepsGoal, dailyWaterGoal
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = FitnessProfile()
+        heightCentimeters = try container.decodeIfPresent(Double.self, forKey: .heightCentimeters) ?? defaults.heightCentimeters
+        age = try container.decodeIfPresent(Int.self, forKey: .age) ?? defaults.age
+        sex = try container.decodeIfPresent(BiologicalSex.self, forKey: .sex) ?? defaults.sex
+        startingWeight = try container.decodeIfPresent(Double.self, forKey: .startingWeight) ?? defaults.startingWeight
+        currentWeightGoal = try container.decodeIfPresent(Double.self, forKey: .currentWeightGoal) ?? defaults.currentWeightGoal
+        fitnessGoal = try container.decodeIfPresent(FitnessGoal.self, forKey: .fitnessGoal) ?? defaults.fitnessGoal
+        activityLevel = try container.decodeIfPresent(ActivityLevel.self, forKey: .activityLevel) ?? defaults.activityLevel
+        trainingExperience = try container.decodeIfPresent(TrainingExperience.self, forKey: .trainingExperience) ?? defaults.trainingExperience
+        equipmentAccess = try container.decodeIfPresent(EquipmentAccess.self, forKey: .equipmentAccess) ?? defaults.equipmentAccess
+        trainingDaysPerWeek = try container.decodeIfPresent(Int.self, forKey: .trainingDaysPerWeek) ?? defaults.trainingDaysPerWeek
+        preferredSessionMinutes = try container.decodeIfPresent(Int.self, forKey: .preferredSessionMinutes) ?? defaults.preferredSessionMinutes
+        posturePriority = try container.decodeIfPresent(Bool.self, forKey: .posturePriority) ?? defaults.posturePriority
+        usesRecommendedNutrition = try container.decodeIfPresent(Bool.self, forKey: .usesRecommendedNutrition) ?? defaults.usesRecommendedNutrition
+        onboardingCompleted = try container.decodeIfPresent(Bool.self, forKey: .onboardingCompleted) ?? defaults.onboardingCompleted
+        dailyCaloriesGoal = try container.decodeIfPresent(Int.self, forKey: .dailyCaloriesGoal) ?? defaults.dailyCaloriesGoal
+        dailyProteinGoal = try container.decodeIfPresent(Int.self, forKey: .dailyProteinGoal) ?? defaults.dailyProteinGoal
+        dailyStepsGoal = try container.decodeIfPresent(Int.self, forKey: .dailyStepsGoal) ?? defaults.dailyStepsGoal
+        dailyWaterGoal = try container.decodeIfPresent(Int.self, forKey: .dailyWaterGoal) ?? defaults.dailyWaterGoal
+    }
+
+    func recommendedNutrition(for weight: Double) -> NutritionTargets {
+        let mass = max(weight, 40)
+        let sexConstant = sex == .male ? 5.0 : -161.0
+        let bmr = (10 * mass) + (6.25 * heightCentimeters) - (5 * Double(age)) + sexConstant
+        let maintenance = bmr * activityLevel.multiplier
+        let minimumCalories = sex == .male ? 1500.0 : 1200.0
+        let calories = Int((max(maintenance * (1 + fitnessGoal.calorieAdjustment), minimumCalories) / 50).rounded() * 50)
+        let protein = Int((mass * fitnessGoal.proteinPerKilogram / 5).rounded() * 5)
+        let fatPerKilogram = fitnessGoal == .fatLoss ? 0.7 : 0.8
+        let fat = max(40, Int((mass * fatPerKilogram / 5).rounded() * 5))
+        let carbs = max(80, Int((Double(calories - protein * 4 - fat * 9) / 4).rounded()))
+        let source = "按 (fitnessGoal.rawValue) · (activityLevel.rawValue) · 当前体重计算"
+        return NutritionTargets(calories: calories, protein: protein, carbs: carbs, fat: fat, sourceText: source)
+    }
 }
 
+struct DashboardWidgetSnapshot: Codable {
+    let generatedAt: Date
+    let streakDays: Int
+    let planTitle: String
+    let planSubtitle: String
+    let workoutCompleted: Bool
+    let mealsLogged: Int
+    let mealTarget: Int
+    let calories: Int
+    let calorieTarget: Int
+    let protein: Int
+    let proteinTarget: Int
+}
+
+enum DashboardWidgetBridge {
+    static let appGroup = "group.com.hty666.gymcoach"
+    static let storageKey = "dashboard-widget-snapshot"
+
+    static func publish(_ snapshot: DashboardWidgetSnapshot) {
+        guard let defaults = UserDefaults(suiteName: appGroup),
+              let data = try? JSONEncoder().encode(snapshot) else { return }
+        defaults.set(data, forKey: storageKey)
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+}
 struct AIConfiguration: Codable {
     var endpoint = ""
     var model = ""
@@ -210,6 +359,40 @@ struct WorkoutPlan: Codable, Identifiable {
     ]
 }
 
+extension WorkoutPlan {
+    static func recommendedWeekly(for profile: FitnessProfile) -> [WorkoutPlan] {
+        let preferredDays: [Int]
+        switch profile.trainingDaysPerWeek {
+        case 1: preferredDays = [3]
+        case 2: preferredDays = [2, 5]
+        case 3: preferredDays = [2, 4, 6]
+        case 4: preferredDays = [2, 3, 5, 6]
+        default: preferredDays = [2, 3, 4, 5, 6]
+        }
+
+        let restPlan = weekly.first(where: { $0.weekday == 1 }) ?? weekly[0]
+        return (1...7).map { weekday in
+            guard preferredDays.contains(weekday), var plan = weekly.first(where: { $0.weekday == weekday }) else {
+                var rest = restPlan
+                rest.id = "rest-\(weekday)"
+                rest.weekday = weekday
+                return rest
+            }
+            plan.id = "personal-\(weekday)"
+            plan.subtitle = "\(profile.fitnessGoal.rawValue) · \(plan.subtitle)"
+            if profile.posturePriority && (weekday == 3 || weekday == 5) {
+                plan.subtitle = "体态优先 · \(plan.subtitle)"
+            }
+            if profile.trainingExperience == .beginner && !plan.exercises.isEmpty {
+                plan.subtitle += " · 每组保留 2–3 次余力"
+            }
+            if profile.fitnessGoal == .muscleGain {
+                plan.cardio = plan.exercises.isEmpty ? plan.cardio : "可选低强度有氧 10–15 分钟，优先完成力量训练"
+            }
+            return plan
+        }
+    }
+}
 struct WorkoutExerciseLog: Codable, Identifiable {
     var id = UUID()
     var exerciseName: String
@@ -248,7 +431,8 @@ final class FitnessStore: ObservableObject {
     @Published private(set) var checkIns: [DailyCheckIn]
     @Published private(set) var sessions: [WorkoutSession]
     @Published private(set) var chatMessages: [ChatMessage]
-    @Published var profile: FitnessProfile { didSet { save(profile, key: Keys.profile) } }
+    @Published private(set) var aiWorkoutPlans: [WorkoutPlan]
+    @Published var profile: FitnessProfile { didSet { save(profile, key: Keys.profile); publishWidgetSnapshot() } }
     @Published var aiConfiguration: AIConfiguration { didSet { save(aiConfiguration, key: Keys.aiConfiguration) } }
     @Published var reminders: [ReminderItem] { didSet { save(reminders, key: Keys.reminders) } }
 
@@ -258,6 +442,7 @@ final class FitnessStore: ObservableObject {
         static let checkIns = "gymcoach.checkins.v2"
         static let sessions = "gymcoach.sessions.v2"
         static let chatMessages = "gymcoach.chat.v2"
+        static let aiWorkoutPlans = "gymcoach.aiWorkoutPlans.v1"
         static let profile = "gymcoach.profile.v2"
         static let aiConfiguration = "gymcoach.ai.v2"
         static let reminders = "gymcoach.reminders.v2"
@@ -269,14 +454,22 @@ final class FitnessStore: ObservableObject {
         checkIns = Self.load([DailyCheckIn].self, key: Keys.checkIns) ?? []
         sessions = Self.load([WorkoutSession].self, key: Keys.sessions) ?? []
         chatMessages = Self.load([ChatMessage].self, key: Keys.chatMessages) ?? []
+        aiWorkoutPlans = Self.load([WorkoutPlan].self, key: Keys.aiWorkoutPlans) ?? []
         profile = Self.load(FitnessProfile.self, key: Keys.profile) ?? FitnessProfile()
         aiConfiguration = Self.load(AIConfiguration.self, key: Keys.aiConfiguration) ?? AIConfiguration()
         reminders = Self.load([ReminderItem].self, key: Keys.reminders) ?? ReminderItem.defaults
+        publishWidgetSnapshot()
     }
+
+    var weeklyPlans: [WorkoutPlan] {
+        aiWorkoutPlans.count == 7 ? aiWorkoutPlans.sorted { $0.weekday < $1.weekday } : WorkoutPlan.recommendedWeekly(for: profile)
+    }
+
+    var isUsingAIWorkoutPlan: Bool { aiWorkoutPlans.count == 7 }
 
     var todayPlan: WorkoutPlan {
         let weekday = Calendar.current.component(.weekday, from: Date())
-        return WorkoutPlan.weekly.first(where: { $0.weekday == weekday }) ?? WorkoutPlan.weekly[0]
+        return weeklyPlans.first(where: { $0.weekday == weekday }) ?? weeklyPlans[0]
     }
 
     var todayMeals: [MealLog] {
@@ -285,6 +478,19 @@ final class FitnessStore: ObservableObject {
 
     var todayNutrition: NutritionEstimate {
         todayMeals.reduce(.empty) { $0.adding($1.nutrition) }
+    }
+
+    var nutritionTargets: NutritionTargets {
+        if profile.usesRecommendedNutrition {
+            return profile.recommendedNutrition(for: currentWeight ?? profile.startingWeight)
+        }
+        return NutritionTargets(
+            calories: profile.dailyCaloriesGoal,
+            protein: profile.dailyProteinGoal,
+            carbs: max(80, Int(Double(profile.dailyCaloriesGoal - profile.dailyProteinGoal * 4 - 60 * 9) / 4)),
+            fat: 60,
+            sourceText: "使用手动设置的每日目标"
+        )
     }
 
     var currentWeight: Double? {
@@ -311,6 +517,23 @@ final class FitnessStore: ObservableObject {
         sessions.filter { Calendar.current.isDate($0.date, equalTo: Date(), toGranularity: .weekOfYear) }.count
     }
 
+    var completedDayStreak: Int {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        var streak = 0
+        for offset in 0..<365 {
+            guard let date = calendar.date(byAdding: .day, value: -offset, to: today) else { break }
+            let hasCheckIn = checkIns.contains { calendar.isDate($0.date, inSameDayAs: date) }
+            let hasWorkout = sessions.contains { calendar.isDate($0.date, inSameDayAs: date) }
+            let mealCount = meals.filter { calendar.isDate($0.date, inSameDayAs: date) }.count
+            if hasCheckIn || hasWorkout || mealCount >= 2 {
+                streak += 1
+            } else {
+                break
+            }
+        }
+        return streak
+    }
     var todayCheckIn: DailyCheckIn {
         checkIns.first(where: { Calendar.current.isDateInToday($0.date) }) ?? DailyCheckIn()
     }
@@ -334,11 +557,13 @@ final class FitnessStore: ObservableObject {
         meals.append(meal)
         meals.sort { $0.date > $1.date }
         save(meals, key: Keys.meals)
+        publishWidgetSnapshot()
     }
 
     func deleteMeal(_ meal: MealLog) {
         meals.removeAll { $0.id == meal.id }
         save(meals, key: Keys.meals)
+        publishWidgetSnapshot()
     }
 
     func addWeight(kilograms: Double, waist: Double?, date: Date = Date()) {
@@ -346,6 +571,7 @@ final class FitnessStore: ObservableObject {
         weights.append(WeightEntry(date: date, kilograms: kilograms, waistCentimeters: waist))
         weights.sort { $0.date > $1.date }
         save(weights, key: Keys.weights)
+        publishWidgetSnapshot()
     }
 
     func updateTodayCheckIn(water: Int, sleepHours: Double?, steps: Int?) {
@@ -358,14 +584,59 @@ final class FitnessStore: ObservableObject {
             checkIns.append(DailyCheckIn(date: today, waterGlasses: water, sleepHours: sleepHours, steps: steps))
         }
         save(checkIns, key: Keys.checkIns)
+        publishWidgetSnapshot()
     }
 
     func addSession(_ session: WorkoutSession) {
         sessions.append(session)
         sessions.sort { $0.date > $1.date }
         save(sessions, key: Keys.sessions)
+        publishWidgetSnapshot()
     }
 
+    func resetPersonalizedWorkoutPlan() {
+        aiWorkoutPlans = []
+        save(aiWorkoutPlans, key: Keys.aiWorkoutPlans)
+        publishWidgetSnapshot()
+    }
+
+    func saveAIWorkoutPlans(_ plans: [WorkoutPlan]) {
+        guard plans.count == 7 else { return }
+        aiWorkoutPlans = plans.sorted { $0.weekday < $1.weekday }
+        save(aiWorkoutPlans, key: Keys.aiWorkoutPlans)
+        publishWidgetSnapshot()
+    }
+
+    func generateAIWorkoutPlan() async throws {
+        guard let apiKey = aiKey else { throw AIService.AIError.requestFailed("请先在设置中保存 AI API Key。") }
+        let plans = try await AIService.generateWeeklyPlan(
+            profile: profile,
+            currentWeight: currentWeight ?? profile.startingWeight,
+            configuration: aiConfiguration,
+            apiKey: apiKey
+        )
+        saveAIWorkoutPlans(plans)
+    }
+
+    func publishWidgetSnapshot() {
+        let nutrition = todayNutrition
+        let target = nutritionTargets
+        let plan = todayPlan
+        let workoutDone = sessions.contains { Calendar.current.isDateInToday($0.date) }
+        DashboardWidgetBridge.publish(DashboardWidgetSnapshot(
+            generatedAt: Date(),
+            streakDays: completedDayStreak,
+            planTitle: plan.title,
+            planSubtitle: plan.subtitle,
+            workoutCompleted: workoutDone,
+            mealsLogged: todayMeals.count,
+            mealTarget: 3,
+            calories: nutrition.calories,
+            calorieTarget: target.calories,
+            protein: nutrition.protein,
+            proteinTarget: target.protein
+        ))
+    }
     func saveAI(configuration: AIConfiguration, apiKey: String) {
         aiConfiguration = configuration
         let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -392,10 +663,10 @@ final class FitnessStore: ObservableObject {
 
     var coachContext: String {
         let nutrition = todayNutrition
-        let weightText = currentWeight.map { String(format: "%.1f kg", $0) } ?? "今日未记录"
-        return "用户资料：23 岁男性，身高 \(Int(profile.heightCentimeters))cm，起始体重 \(String(format: "%.1f", profile.startingWeight))kg，目标 \(String(format: "%.1f", profile.currentWeightGoal))kg。当前体重：\(weightText)。今日已记录：\(nutrition.calories) kcal，蛋白质 \(nutrition.protein)g，碳水 \(nutrition.carbs)g，脂肪 \(nutrition.fat)g。今日训练：\(todayPlan.title)。每日报告目标：\(profile.dailyCaloriesGoal) kcal、蛋白质 \(profile.dailyProteinGoal)g、步数 \(profile.dailyStepsGoal)。"
+        let targets = nutritionTargets
+        let weightText = currentWeight.map { String(format: "%.1f", $0) } ?? "未记录"
+        return "用户资料：\(profile.age) 岁\(profile.sex.rawValue)，身高 \(Int(profile.heightCentimeters))cm，当前体重 \(weightText)kg，目标 \(profile.fitnessGoal.rawValue)，目标体重 \(String(format: "%.1f", profile.currentWeightGoal))kg。训练：\(profile.trainingDaysPerWeek) 天/周，每次约 \(profile.preferredSessionMinutes) 分钟，\(profile.trainingExperience.rawValue)，器械：\(profile.equipmentAccess.rawValue)，体态优先：\(profile.posturePriority ? "是" : "否")。今日已记录：\(nutrition.calories) kcal，蛋白质 \(nutrition.protein)g，碳水 \(nutrition.carbs)g，脂肪 \(nutrition.fat)g。个人化目标：\(targets.calories) kcal、蛋白质 \(targets.protein)g、碳水 \(targets.carbs)g、脂肪 \(targets.fat)g。今天训练：\(todayPlan.title)。"
     }
-
     private static func load<T: Decodable>(_ type: T.Type, key: String) -> T? {
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
         return try? JSONDecoder().decode(type, from: data)
@@ -533,7 +804,10 @@ enum FoodEstimator {
 
 // MARK: - AI service
 
-enum AIService {
+enum AIService {    private struct GeneratedPlanResponse: Decodable {
+        let weeklyPlans: [WorkoutPlan]
+    }
+
     static func refineMeal(text: String, imageData: Data?, configuration: AIConfiguration, apiKey: String) async throws -> NutritionEstimate {
         let prompt = """
         你是一位谨慎的中文健身饮食助手。根据用户提供的一餐文字和可选图片，估算热量与宏量营养素。
@@ -578,6 +852,32 @@ enum AIService {
         )
     }
 
+    static func generateWeeklyPlan(profile: FitnessProfile, currentWeight: Double, configuration: AIConfiguration, apiKey: String) async throws -> [WorkoutPlan] {
+        let prompt = """
+        你是谨慎的中文私教。基于以下个人资料生成 7 天训练安排：
+         年龄：\(profile.age)，性别：\(profile.sex.rawValue)，身高：\(Int(profile.heightCentimeters))cm，体重：\(String(format: "%.1f", currentWeight))kg，目标：\(profile.fitnessGoal.rawValue)，每周训练：\(profile.trainingDaysPerWeek) 天，每次：\(profile.preferredSessionMinutes) 分钟，经验：\(profile.trainingExperience.rawValue)，器械：\(profile.equipmentAccess.rawValue)，体态关注：\(profile.posturePriority ? "前倾/圆肩" : "无")。
+        输出严格 JSON，不要 Markdown，不要解释。格式必须是：
+        {"weeklyPlans":[{"id":"day-1","weekday":1,"title":"中文标题","subtitle":"一句重点","exercises":[{"name":"动作名","target":"组数 × 次数","cue":"简短动作提示"}],"cardio":"可选有氧或 null"}]}
+        必须恰好包含 weekday 1 到 7 各一天。非训练日 exercises 为空数组。对新手避免高风险动作；体态关注为真时安排上背、后肩和活动度练习。不要给药物剂量、疾病诊断或疼痛治疗建议。
+        """
+        let response = try await send(
+            prompt: prompt,
+            imageData: nil,
+            configuration: configuration,
+            apiKey: apiKey,
+            systemPrompt: "只返回能够被 JSONDecoder 解析的 JSON。"
+        )
+        let json = extractJSON(from: response)
+        guard let data = json.data(using: .utf8) else { throw AIError.unreadableResponse }
+        let decoded = try JSONDecoder().decode(GeneratedPlanResponse.self, from: data)
+        let plans = decoded.weeklyPlans
+            .filter { (1...7).contains($0.weekday) }
+            .sorted { $0.weekday < $1.weekday }
+        guard plans.count == 7, Set(plans.map(\.weekday)).count == 7 else {
+            throw AIError.requestFailed("AI 返回的训练计划不完整，请重试。")
+        }
+        return plans
+    }
     private static func send(prompt: String, imageData: Data?, configuration: AIConfiguration, apiKey: String, systemPrompt: String) async throws -> String {
         guard let url = URL(string: configuration.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)),
               url.scheme == "https" || url.scheme == "http" else {
@@ -690,28 +990,49 @@ enum NotificationManager {
 final class HealthManager: ObservableObject {
     private let healthStore = HKHealthStore()
     @Published var steps = 0
+    @Published var isRefreshing = false
     @Published var errorMessage: String?
+    @Published var showingHelp = false
+    @Published var lastSyncedAt: Date?
 
     func refreshSteps() async {
         guard HKHealthStore.isHealthDataAvailable(),
-              let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) else { return }
+              let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) else {
+            errorMessage = "这台设备当前无法使用健康数据。"
+            return
+        }
+
+        isRefreshing = true
+        defer { isRefreshing = false }
         do {
-            try await healthStore.requestAuthorization(toShare: [], read: [stepType])
-            let start = Calendar.current.startOfDay(for: Date())
-            let predicate = HKQuery.predicateForSamples(withStart: start, end: Date())
-            let descriptor = HKStatisticsQueryDescriptor(predicate: .quantitySample(type: stepType, predicate: predicate), options: .cumulativeSum)
+            let status = try await healthStore.statusForAuthorizationRequest(toShare: [], read: [stepType])
+            if status == .shouldRequest {
+                try await healthStore.requestAuthorization(toShare: [], read: [stepType])
+            }
+
+            let calendar = Calendar(identifier: .gregorian)
+            let start = calendar.startOfDay(for: Date())
+            let end = calendar.date(byAdding: .day, value: 1, to: start) ?? Date()
+            let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
+            let descriptor = HKStatisticsQueryDescriptor(
+                predicate: .quantitySample(type: stepType, predicate: predicate),
+                options: .cumulativeSum
+            )
             let result = try await descriptor.result(for: healthStore)
             steps = Int(result?.sumQuantity()?.doubleValue(for: .count()) ?? 0)
-            errorMessage = nil
+            lastSyncedAt = Date()
+            errorMessage = steps == 0 ? "尚未读取到今日步数。请确认健康 App 已允许“练了么”读取步数。" : nil
         } catch {
-            errorMessage = "未能读取步数，可在健康 App 授权后重试。"
+            errorMessage = "同步失败：\(error.localizedDescription)"
         }
     }
 }
-
 // MARK: - Root and today
 
 struct RootView: View {
+    @EnvironmentObject private var store: FitnessStore
+    @State private var showingProfileSetup = false
+
     var body: some View {
         TabView {
             NavigationStack { TodayView() }
@@ -726,6 +1047,12 @@ struct RootView: View {
                 .tabItem { Label("进度", systemImage: "chart.line.uptrend.xyaxis") }
         }
         .tint(.green)
+        .onAppear { showingProfileSetup = !store.profile.onboardingCompleted }
+        .fullScreenCover(isPresented: $showingProfileSetup) {
+            PersonalProfileSetupView(isOnboarding: true) {
+                showingProfileSetup = false
+            }
+        }
     }
 }
 struct TodayView: View {
@@ -738,7 +1065,7 @@ struct TodayView: View {
     }
 
     private var remainingCalories: Int {
-        max(store.profile.dailyCaloriesGoal - store.todayNutrition.calories, 0)
+        max(store.nutritionTargets.calories - store.todayNutrition.calories, 0)
     }
 
     var body: some View {
@@ -772,7 +1099,7 @@ struct TodayView: View {
 
                     TodayMetric(
                         title: "今日步数",
-                        value: health.steps == 0 ? "同步步数" : "\(health.steps)",
+                        value: health.isRefreshing ? "同步中…" : (health.steps == 0 ? "同步步数" : "\(health.steps)"),
                         icon: "figure.walk",
                         tint: .orange
                     ) {
@@ -783,6 +1110,16 @@ struct TodayView: View {
                 .overlay {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .stroke(Color(uiColor: .separator).opacity(0.28), lineWidth: 0.5)
+                }
+
+                if let errorMessage = health.errorMessage {
+                    Button { health.showingHelp = true } label: {
+                        Label(errorMessage, systemImage: "heart.text.square")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 VStack(alignment: .leading, spacing: 16) {
@@ -840,15 +1177,15 @@ struct TodayView: View {
                     NutrientProgress(
                         title: "热量",
                         value: store.todayNutrition.calories,
-                        target: store.profile.dailyCaloriesGoal,
+                        target: store.nutritionTargets.calories,
                         unit: "kcal",
                         color: .orange
                     )
 
                     HStack(spacing: 12) {
-                        MacroValue(title: "蛋白质", value: store.todayNutrition.protein, target: store.profile.dailyProteinGoal, color: .green)
-                        MacroValue(title: "碳水", value: store.todayNutrition.carbs, target: nil, color: .blue)
-                        MacroValue(title: "脂肪", value: store.todayNutrition.fat, target: nil, color: .pink)
+                        MacroValue(title: "蛋白质", value: store.todayNutrition.protein, target: store.nutritionTargets.protein, color: .green)
+                        MacroValue(title: "碳水", value: store.todayNutrition.carbs, target: store.nutritionTargets.carbs, color: .blue)
+                        MacroValue(title: "脂肪", value: store.todayNutrition.fat, target: store.nutritionTargets.fat, color: .pink)
                     }
                 }
                 .cardStyle()
@@ -897,6 +1234,7 @@ struct TodayView: View {
             Task { await health.refreshSteps() }
         }
         .sheet(isPresented: $showingWeight) { WeightEntryView() }
+        .sheet(isPresented: $health.showingHelp) { HealthStepsHelpView() }
     }
 }
 
@@ -927,6 +1265,31 @@ struct TodayMetric: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint("轻点更新或记录")
+    }
+}
+struct HealthStepsHelpView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("打开步数读取") {
+                    Text("在 iPhone 的健康 App 中依次打开：右上角头像 → App 与服务 → 练了么 → 打开“步数”。")
+                    Text("HealthKit 为了保护隐私，在未允许读取时只会返回 0；允许后回到首页点“同步步数”即可。")
+                        .foregroundStyle(.secondary)
+                }
+                Section("仍然为 0？") {
+                    Text("确认今天 iPhone 或 Apple Watch 已产生步数，并在设备解锁后再同步一次。")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("步数同步")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
     }
 }
 struct MetricCard: View {
@@ -1047,9 +1410,9 @@ struct CoachAdviceCard: View {
     private var tips: [String] {
         var items: [String] = []
         if store.currentWeight == nil { items.append("明早称一次体重；以后看 7 日平均，不用被单日波动影响。") }
-        let proteinGap = store.profile.dailyProteinGoal - store.todayNutrition.protein
+        let proteinGap = store.nutritionTargets.protein - store.todayNutrition.protein
         if proteinGap > 25 { items.append("今天还差约 \(proteinGap)g 蛋白质：晚餐优先鸡肉、鱼、牛肉、豆腐或酸奶。") }
-        if store.todayNutrition.calories > store.profile.dailyCaloriesGoal { items.append("热量已接近或超过目标，晚餐选高蛋白和蔬菜，主食减半。") }
+        if store.todayNutrition.calories > store.nutritionTargets.calories { items.append("热量已接近或超过目标，晚餐选高蛋白和蔬菜，主食减半。") }
         if store.weeklyTrainingCount < 3 { items.append("本周已记录 \(store.weeklyTrainingCount) 次训练；下班到健身房完成最低训练量就够。") }
         if items.isEmpty { items.append("记录做得不错。训练日保持正常进食，不要为了补偿而极端节食。") }
         return Array(items.prefix(3))
@@ -1379,51 +1742,179 @@ struct NutritionValue: View {
 struct WorkoutHomeView: View {
     @EnvironmentObject private var store: FitnessStore
 
+    private var plan: WorkoutPlan { store.todayPlan }
+    private var completedToday: Bool {
+        store.sessions.contains { Calendar.current.isDateInToday($0.date) }
+    }
+
     var body: some View {
-        List {
-            Section("今天") {
-                NavigationLink { WorkoutSessionView(plan: store.todayPlan) } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(store.todayPlan.title).font(.headline)
-                        Text(store.todayPlan.subtitle).font(.subheadline).foregroundStyle(.secondary)
-                        if let cardio = store.todayPlan.cardio { Text(cardio).font(.caption).foregroundStyle(.green) }
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(completedToday ? "今天已完成" : "今天的训练")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(completedToday ? .green : .secondary)
+                            Text(plan.title)
+                                .font(.title2.weight(.bold))
+                            Text(plan.subtitle)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 12)
+                        Image(systemName: completedToday ? "checkmark.seal.fill" : "figure.strengthtraining.traditional")
+                            .font(.title2)
+                            .foregroundStyle(completedToday ? .green : .primary)
+                    }
+
+                    HStack(spacing: 16) {
+                        Label("约 \(store.profile.preferredSessionMinutes) 分钟", systemImage: "clock")
+                        Label("\(plan.exercises.count) 个动作", systemImage: "list.bullet")
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+
+                    if completedToday {
+                        Label("这次训练已经记录。恢复、吃够蛋白质和正常活动同样算进计划。", systemImage: "checkmark.circle.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        NavigationLink { WorkoutSessionView(plan: plan) } label: {
+                            Label(plan.exercises.isEmpty ? "查看恢复安排" : "开始训练", systemImage: "play.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .tint(.green)
                     }
                 }
-            }
-            Section("体态改善") {
-                NavigationLink { PostureGuideView() } label: {
-                    Label("前倾、圆肩与久坐改善", systemImage: "figure.stand")
+                .cardStyle()
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("本周节奏")
+                        .font(.headline)
+                    TrainingWeekStrip(plans: store.weeklyPlans)
+                    Text(store.isUsingAIWorkoutPlan ? "这是按你的资料由 AI 生成的本周计划，可随时在训练配置里更新。" : "这是按你的目标、训练频率和体态关注生成的基础计划；连接 AI 后可生成更细的本周动作。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
-            }
-            Section("本周安排") {
-                ForEach(WorkoutPlan.weekly) { plan in
-                    NavigationLink { WorkoutSessionView(plan: plan) } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(plan.title)
-                            Text(plan.subtitle).font(.caption).foregroundStyle(.secondary)
+
+                if !plan.exercises.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack {
+                            Text("今天的动作")
+                                .font(.headline)
+                            Spacer()
+                            Text("先完成前 3 个也算完成最低训练量")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.bottom, 8)
+
+                        ForEach(Array(plan.exercises.prefix(5).enumerated()), id: \.element.id) { index, exercise in
+                            HStack(alignment: .top, spacing: 12) {
+                                Text("\(index + 1)")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 20, height: 20)
+                                    .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(exercise.name)
+                                        .font(.subheadline.weight(.semibold))
+                                    Text("\(exercise.target) · \(exercise.cue)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.vertical, 10)
+                            if exercise.id != plan.exercises.prefix(5).last?.id {
+                                Divider().padding(.leading, 32)
+                            }
                         }
                     }
+                    .cardStyle()
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("训练配置")
+                            .font(.headline)
+                        Spacer()
+                        NavigationLink("编辑") { PersonalProfileSetupView(isOnboarding: false) {} }
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    Text("\(store.profile.fitnessGoal.rawValue) · \(store.profile.trainingDaysPerWeek) 天/周 · \(store.profile.preferredSessionMinutes) 分钟 · \(store.profile.equipmentAccess.rawValue)")
+                        .font(.subheadline)
+                    Text(store.profile.posturePriority ? "已加入前倾/圆肩的上背、后肩与活动度练习。" : "当前计划不额外强调体态练习。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .cardStyle()
+
+                if let session = store.sessions.first {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("最近一次训练")
+                            .font(.headline)
+                        Text(session.planTitle)
+                            .font(.subheadline.weight(.semibold))
+                        Text("(session.date.formatted(date: .abbreviated, time: .omitted)) · (session.exercises.filter(\.completed).count) 个动作完成 · RPE (session.perceivedEffort)/10")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .cardStyle()
                 }
             }
-            Section("训练记录") {
-                if store.sessions.isEmpty {
-                    Text("完成一次训练后，这里会留下重量、次数和主观强度。")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(store.sessions.prefix(10)) { session in
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(session.planTitle).font(.headline)
-                            Text("\(session.date.formatted(date: .abbreviated, time: .shortened)) · \(session.exercises.filter(\.completed).count) 个动作完成 · RPE \(session.perceivedEffort)")
-                                .font(.caption).foregroundStyle(.secondary)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 32)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .navigationTitle("训练")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink { PersonalProfileSetupView(isOnboarding: false) {} } label: {
+                    Image(systemName: "slider.horizontal.3")
+                }
+            }
+        }
+    }
+}
+
+struct TrainingWeekStrip: View {
+    let plans: [WorkoutPlan]
+    private let dayNames = ["日", "一", "二", "三", "四", "五", "六"]
+
+    var body: some View {
+        let today = Calendar.current.component(.weekday, from: Date())
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(plans) { plan in
+                    let isToday = plan.weekday == today
+                    let isRest = plan.exercises.isEmpty
+                    VStack(spacing: 5) {
+                        Text(dayNames[plan.weekday - 1])
+                            .font(.caption.weight(.semibold))
+                        Image(systemName: isRest ? "leaf" : "dumbbell.fill")
+                            .font(.caption)
+                        Text(isToday ? "今天" : (isRest ? "恢复" : "训练"))
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(isToday ? Color.white : (isRest ? Color.secondary : Color.primary))
+                    .frame(width: 54, height: 66)
+                    .background(isToday ? Color.green : Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay {
+                        if !isToday {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(Color(uiColor: .separator).opacity(0.24), lineWidth: 0.5)
                         }
                     }
                 }
             }
         }
-        .navigationTitle("训练")
     }
 }
-
 private struct ExerciseDraft: Identifiable {
     let id = UUID()
     let exercise: Exercise
@@ -1636,6 +2127,7 @@ struct ProgressDashboardView: View {
         }
         .navigationTitle("进度")
         .sheet(isPresented: $showingWeight) { WeightEntryView() }
+        .sheet(isPresented: $health.showingHelp) { HealthStepsHelpView() }
     }
 
     private var trendAdvice: String {
@@ -1794,26 +2286,160 @@ struct CoachChatView: View {
     }
 }
 
-struct SettingsView: View {
+struct NutritionTargetRow: View {
+    let title: String
+    let value: String
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.headline)
+                .foregroundStyle(tint)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct PersonalProfileSetupView: View {
     @EnvironmentObject private var store: FitnessStore
+    @Environment(\.dismiss) private var dismiss
+    let isOnboarding: Bool
+    let onFinish: () -> Void
+    @State private var isGenerating = false
+    @State private var message = ""
+
+    private var targets: NutritionTargets { store.nutritionTargets }
 
     var body: some View {
         Form {
-            Section("个人目标") {
-                TextField("身高（cm）", value: $store.profile.heightCentimeters, format: .number).keyboardType(.decimalPad)
+            Section("身体与目标") {
+                TextField("身高（cm）", value: $store.profile.heightCentimeters, format: .number)
+                    .keyboardType(.decimalPad)
                 Stepper("年龄：\(store.profile.age) 岁", value: $store.profile.age, in: 16...80)
                 Picker("性别", selection: $store.profile.sex) {
                     ForEach(BiologicalSex.allCases) { Text($0.rawValue).tag($0) }
                 }
-                TextField("开始体重（kg）", value: $store.profile.startingWeight, format: .number).keyboardType(.decimalPad)
-                TextField("目标体重（kg）", value: $store.profile.currentWeightGoal, format: .number).keyboardType(.decimalPad)
+                TextField("当前/起始体重（kg）", value: $store.profile.startingWeight, format: .number)
+                    .keyboardType(.decimalPad)
+                TextField("目标体重（kg）", value: $store.profile.currentWeightGoal, format: .number)
+                    .keyboardType(.decimalPad)
+                Picker("当前目标", selection: $store.profile.fitnessGoal) {
+                    ForEach(FitnessGoal.allCases) { Text($0.rawValue).tag($0) }
+                }
             }
-            Section("每日目标") {
-                Stepper("热量：\(store.profile.dailyCaloriesGoal) kcal", value: $store.profile.dailyCaloriesGoal, in: 1500...4000, step: 50)
-                Stepper("蛋白质：\(store.profile.dailyProteinGoal) g", value: $store.profile.dailyProteinGoal, in: 80...240, step: 5)
+
+            Section("训练条件") {
+                Picker("日常活动量", selection: $store.profile.activityLevel) {
+                    ForEach(ActivityLevel.allCases) { Text($0.rawValue).tag($0) }
+                }
+                Picker("训练经验", selection: $store.profile.trainingExperience) {
+                    ForEach(TrainingExperience.allCases) { Text($0.rawValue).tag($0) }
+                }
+                Picker("可用器械", selection: $store.profile.equipmentAccess) {
+                    ForEach(EquipmentAccess.allCases) { Text($0.rawValue).tag($0) }
+                }
+                Stepper("每周训练：\(store.profile.trainingDaysPerWeek) 天", value: $store.profile.trainingDaysPerWeek, in: 1...6)
+                Stepper("单次训练：\(store.profile.preferredSessionMinutes) 分钟", value: $store.profile.preferredSessionMinutes, in: 30...120, step: 15)
+                Toggle("优先改善前倾/圆肩", isOn: $store.profile.posturePriority)
+            }
+
+            Section("每日营养目标") {
+                Toggle("按个人情况自动计算", isOn: $store.profile.usesRecommendedNutrition)
+                if store.profile.usesRecommendedNutrition {
+                    HStack(spacing: 12) {
+                        NutritionTargetRow(title: "热量", value: "\(targets.calories) kcal", tint: .orange)
+                        NutritionTargetRow(title: "蛋白质", value: "\(targets.protein) g", tint: .green)
+                        NutritionTargetRow(title: "碳水", value: "\(targets.carbs) g", tint: .blue)
+                        NutritionTargetRow(title: "脂肪", value: "\(targets.fat) g", tint: .pink)
+                    }
+                    Text(targets.sourceText)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Text("这是个人化起点，不是医疗处方。体重趋势、饥饿感和训练表现出现持续异常时，应调整目标或咨询专业人士。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Stepper("热量：\(store.profile.dailyCaloriesGoal) kcal", value: $store.profile.dailyCaloriesGoal, in: 1200...4500, step: 50)
+                    Stepper("蛋白质：\(store.profile.dailyProteinGoal) g", value: $store.profile.dailyProteinGoal, in: 60...300, step: 5)
+                }
+            }
+
+            Section("计划") {
+                Button("保存资料并使用基础计划") {
+                    store.profile.onboardingCompleted = true
+                    store.resetPersonalizedWorkoutPlan()
+                    message = "已按当前资料更新基础计划。"
+                    if isOnboarding { onFinish() }
+                }
+
+                Button {
+                    Task {
+                        isGenerating = true
+                        defer { isGenerating = false }
+                        do {
+                            try await store.generateAIWorkoutPlan()
+                            store.profile.onboardingCompleted = true
+                            message = "AI 已更新本周训练安排。"
+                            if isOnboarding { onFinish() }
+                        } catch {
+                            message = error.localizedDescription
+                        }
+                    }
+                } label: {
+                    if isGenerating { ProgressView() } else { Label("用 AI 生成本周训练", systemImage: "sparkles") }
+                }
+                .disabled(!store.canUseAI || isGenerating)
+
+                if !store.canUseAI {
+                    Text("连接 AI 接口后，可根据以上资料生成/更新本周动作。未连接时仍会使用基础计划。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                if !message.isEmpty {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle(isOnboarding ? "建立你的计划" : "个人计划")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if !isOnboarding {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+struct SettingsView: View {
+    @EnvironmentObject private var store: FitnessStore
+
+    var body: some View {
+        List {
+            Section {
+                NavigationLink { PersonalProfileSetupView(isOnboarding: false) {} } label: {
+                    Label("个人情况与训练计划", systemImage: "person.crop.circle")
+                }
+            } footer: {
+                Text("\(store.profile.fitnessGoal.rawValue) · \(store.profile.trainingDaysPerWeek) 天/周 · \(store.profile.equipmentAccess.rawValue)")
+            }
+
+            Section("当前每日目标") {
+                LabeledContent("热量", value: "\(store.nutritionTargets.calories) kcal")
+                LabeledContent("蛋白质", value: "\(store.nutritionTargets.protein) g")
+                LabeledContent("碳水", value: "\(store.nutritionTargets.carbs) g")
+                LabeledContent("脂肪", value: "\(store.nutritionTargets.fat) g")
                 Stepper("步数：\(store.profile.dailyStepsGoal)", value: $store.profile.dailyStepsGoal, in: 3000...15000, step: 500)
                 Stepper("饮水：\(store.profile.dailyWaterGoal) 杯", value: $store.profile.dailyWaterGoal, in: 4...16)
             }
+
             Section("智能与提醒") {
                 NavigationLink { AISettingsView() } label: {
                     Label(store.canUseAI ? "AI 接口与教练（已连接）" : "AI 接口与教练", systemImage: "sparkles")
@@ -1822,22 +2448,25 @@ struct SettingsView: View {
                     Label("自定义提醒", systemImage: "bell.badge")
                 }
             }
+
             Section("健康数据") {
-                Label("首页可读取当日步数", systemImage: "heart.text.square")
-                Text("首次点击步数会请求 HealthKit 授权；你可以只允许读取步数。")
-                    .font(.footnote).foregroundStyle(.secondary)
+                NavigationLink { HealthStepsHelpView() } label: {
+                    Label("步数同步与授权", systemImage: "heart.text.square")
+                }
             }
+
             Section("数据与安全") {
                 Text("饮食、训练和体重数据只保存在本机。API Key 仅保存于本机 Keychain，不会写入 GitHub 或代码。")
-                    .font(.footnote).foregroundStyle(.secondary)
-                Text("这是个人训练工具，不提供药物剂量或疾病诊断。出现持续疼痛或不适时，请咨询医生或康复专业人员。")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Text("这是个人训练工具，不提供药物剂量、疾病诊断或替代医疗建议。出现持续疼痛或不适时，请咨询医生或康复专业人员。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
         .navigationTitle("我的")
     }
 }
-
 struct AISettingsView: View {
     @EnvironmentObject private var store: FitnessStore
     @State private var endpoint = ""
