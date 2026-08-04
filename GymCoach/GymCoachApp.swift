@@ -236,7 +236,7 @@ struct FitnessProfile: Codable {
         let fatPerKilogram = fitnessGoal == .fatLoss ? 0.7 : 0.8
         let fat = max(40, Int((mass * fatPerKilogram / 5).rounded() * 5))
         let carbs = max(80, Int((Double(calories - protein * 4 - fat * 9) / 4).rounded()))
-        let source = "按 (fitnessGoal.rawValue) · (activityLevel.rawValue) · 当前体重计算"
+        let source = "按 \(fitnessGoal.rawValue) · \(activityLevel.rawValue) · 当前体重计算"
         return NutritionTargets(calories: calories, protein: protein, carbs: carbs, fat: fat, sourceText: source)
     }
 }
