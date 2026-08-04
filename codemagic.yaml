@@ -8,6 +8,7 @@ workflows:
       vars:
         XCODE_PROJECT: "GymCoach.xcodeproj"
         XCODE_SCHEME: "GymCoach"
+        OUTPUT_IPA: GymCoach-unsigned.ipa
     scripts:
       - name: Build GymCoach without code signing
         script: |
@@ -16,15 +17,23 @@ workflows:
           xcodebuild \
             -project "$CM_BUILD_DIR/$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
-            -configuration Debug \
+            -configuration Release \
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$CM_BUILD_DIR/build/DerivedData" \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             build | tee /tmp/xcodebuild_logs/build.log
-    artifacts:
-      - build/DerivedData/Build/Products/Debug-iphoneos/*.app
-      - build/DerivedData/Build/Products/Debug-iphoneos/*.dSYM
-      - /tmp/xcodebuild_logs/*.log
 
+      - name: Package unsigned IPA
+        script: |
+          APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/GymCoach.app"
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
+          zip -r "$OUTPUT_IPA" Payload
+          rm -rf Payload
+    artifacts:
+      - GymCoach-unsigned.ipa
+      - build/DerivedData/Build/Products/Release-iphoneos/*.app
+      - build/DerivedData/Build/Products/Release-iphoneos/*.dSYM
+      - /tmp/xcodebuild_logs/*.log
