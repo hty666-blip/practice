@@ -1,22 +1,14 @@
-# 练了吗（GymCoach）
+# 练了么 GymCoach
 
-一个面向减脂、训练打卡和饮食记录的原生 iPhone App 原型。当前版本已包含：
+面向个人减脂的 iPhone 原生应用，最低支持 iOS 17。
 
-- 早餐、午餐、晚餐与加餐记录
-- 根据文字的本地营养估算；配置 AI 接口后，可用文字或餐食照片复核
-- 每周 5 天的训练与有氧安排、训练打卡
-- 体重记录和 7 日平均趋势
-- 可自行设置称重、午餐、训练和晚间复盘提醒
-- HealthKit 步数读取入口
+已包含：早餐/午餐/晚餐/加餐记录、图片与文字营养估算、可自定义的 OpenAI 兼容 API、AI 教练问答、5 天训练安排、动作完成和训练重量记录、体态改善动作、体重腰围趋势图、饮水睡眠打卡、HealthKit 步数读取，以及可增删改时间的本地提醒。
 
-## 在 Xcode 中运行
+## AI 设置
 
-1. 用 Xcode 15 或更新版本打开 `GymCoach.xcodeproj`。
-2. 选择 iOS 17 或更新版本的模拟器，直接运行。
-3. 在“我的 → AI 接口”中填写兼容 Chat Completions 格式的接口地址、模型名称和 API Key。
+在 App 的「我的 → AI 接口与教练」填写完整的 Chat Completions 地址、模型名和自己的 API Key。Key 仅保存于设备 Keychain；个人自用可以直连，若未来发布给他人使用，应改为服务端代理，绝不能将共享 Key 写入 App。
 
-API Key 仅通过 Keychain 保存。此开发版允许 App 直接调用你的 AI 服务；如果发布给其他人使用，应改为 `iPhone App → 自有后端 → AI API`，不要让任何用户的 API Key 暴露在客户端。
+## Codemagic
 
-## AI 接口格式
+当前 `codemagic.yaml` 是无签名验证工作流：成功时生成 `.app` 和日志，不会生成可安装 IPA。准备好 Apple 证书和描述文件后，再添加签名工作流导出 IPA。
 
-当前实现发送标准的 `POST /chat/completions` 请求，支持文本和 `image_url`（base64 data URL）形式的餐食图片。模型需能按提示返回 JSON。未配置接口时，记录功能和本地估算仍然可用。

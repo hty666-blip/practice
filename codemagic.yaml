@@ -27,3 +27,4 @@ workflows:
       - build/DerivedData/Build/Products/Debug-iphoneos/*.app
       - build/DerivedData/Build/Products/Debug-iphoneos/*.dSYM
       - /tmp/xcodebuild_logs/*.log
+
