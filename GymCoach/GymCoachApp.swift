@@ -5,7 +5,6 @@ import HealthKit
 import Security
 import Charts
 import UIKit
-import WidgetKit
 
 @main
 struct GymCoachApp: App {
@@ -240,32 +239,6 @@ struct FitnessProfile: Codable {
         return NutritionTargets(calories: calories, protein: protein, carbs: carbs, fat: fat, sourceText: source)
     }
 }
-
-struct DashboardWidgetSnapshot: Codable {
-    let generatedAt: Date
-    let streakDays: Int
-    let planTitle: String
-    let planSubtitle: String
-    let workoutCompleted: Bool
-    let mealsLogged: Int
-    let mealTarget: Int
-    let calories: Int
-    let calorieTarget: Int
-    let protein: Int
-    let proteinTarget: Int
-}
-
-enum DashboardWidgetBridge {
-    static let appGroup = "group.com.hty666.gymcoach"
-    static let storageKey = "dashboard-widget-snapshot"
-
-    static func publish(_ snapshot: DashboardWidgetSnapshot) {
-        guard let defaults = UserDefaults(suiteName: appGroup),
-              let data = try? JSONEncoder().encode(snapshot) else { return }
-        defaults.set(data, forKey: storageKey)
-        WidgetCenter.shared.reloadAllTimelines()
-    }
-}
 struct AIConfiguration: Codable {
     var endpoint = ""
     var model = ""
@@ -432,7 +405,7 @@ final class FitnessStore: ObservableObject {
     @Published private(set) var sessions: [WorkoutSession]
     @Published private(set) var chatMessages: [ChatMessage]
     @Published private(set) var aiWorkoutPlans: [WorkoutPlan]
-    @Published var profile: FitnessProfile { didSet { save(profile, key: Keys.profile); publishWidgetSnapshot() } }
+    @Published var profile: FitnessProfile { didSet { save(profile, key: Keys.profile) } }
     @Published var aiConfiguration: AIConfiguration { didSet { save(aiConfiguration, key: Keys.aiConfiguration) } }
     @Published var reminders: [ReminderItem] { didSet { save(reminders, key: Keys.reminders) } }
 
@@ -458,7 +431,6 @@ final class FitnessStore: ObservableObject {
         profile = Self.load(FitnessProfile.self, key: Keys.profile) ?? FitnessProfile()
         aiConfiguration = Self.load(AIConfiguration.self, key: Keys.aiConfiguration) ?? AIConfiguration()
         reminders = Self.load([ReminderItem].self, key: Keys.reminders) ?? ReminderItem.defaults
-        publishWidgetSnapshot()
     }
 
     var weeklyPlans: [WorkoutPlan] {
@@ -557,13 +529,11 @@ final class FitnessStore: ObservableObject {
         meals.append(meal)
         meals.sort { $0.date > $1.date }
         save(meals, key: Keys.meals)
-        publishWidgetSnapshot()
     }
 
     func deleteMeal(_ meal: MealLog) {
         meals.removeAll { $0.id == meal.id }
         save(meals, key: Keys.meals)
-        publishWidgetSnapshot()
     }
 
     func addWeight(kilograms: Double, waist: Double?, date: Date = Date()) {
@@ -571,7 +541,6 @@ final class FitnessStore: ObservableObject {
         weights.append(WeightEntry(date: date, kilograms: kilograms, waistCentimeters: waist))
         weights.sort { $0.date > $1.date }
         save(weights, key: Keys.weights)
-        publishWidgetSnapshot()
     }
 
     func updateTodayCheckIn(water: Int, sleepHours: Double?, steps: Int?) {
@@ -584,27 +553,23 @@ final class FitnessStore: ObservableObject {
             checkIns.append(DailyCheckIn(date: today, waterGlasses: water, sleepHours: sleepHours, steps: steps))
         }
         save(checkIns, key: Keys.checkIns)
-        publishWidgetSnapshot()
     }
 
     func addSession(_ session: WorkoutSession) {
         sessions.append(session)
         sessions.sort { $0.date > $1.date }
         save(sessions, key: Keys.sessions)
-        publishWidgetSnapshot()
     }
 
     func resetPersonalizedWorkoutPlan() {
         aiWorkoutPlans = []
         save(aiWorkoutPlans, key: Keys.aiWorkoutPlans)
-        publishWidgetSnapshot()
     }
 
     func saveAIWorkoutPlans(_ plans: [WorkoutPlan]) {
         guard plans.count == 7 else { return }
         aiWorkoutPlans = plans.sorted { $0.weekday < $1.weekday }
         save(aiWorkoutPlans, key: Keys.aiWorkoutPlans)
-        publishWidgetSnapshot()
     }
 
     func generateAIWorkoutPlan() async throws {
@@ -618,25 +583,6 @@ final class FitnessStore: ObservableObject {
         saveAIWorkoutPlans(plans)
     }
 
-    func publishWidgetSnapshot() {
-        let nutrition = todayNutrition
-        let target = nutritionTargets
-        let plan = todayPlan
-        let workoutDone = sessions.contains { Calendar.current.isDateInToday($0.date) }
-        DashboardWidgetBridge.publish(DashboardWidgetSnapshot(
-            generatedAt: Date(),
-            streakDays: completedDayStreak,
-            planTitle: plan.title,
-            planSubtitle: plan.subtitle,
-            workoutCompleted: workoutDone,
-            mealsLogged: todayMeals.count,
-            mealTarget: 3,
-            calories: nutrition.calories,
-            calorieTarget: target.calories,
-            protein: nutrition.protein,
-            proteinTarget: target.protein
-        ))
-    }
     func saveAI(configuration: AIConfiguration, apiKey: String) {
         aiConfiguration = configuration
         let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)

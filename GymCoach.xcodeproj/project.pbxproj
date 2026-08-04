@@ -8,40 +8,16 @@
 /* Begin PBXBuildFile section */
 		A10000000000000000000019 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000020 /* Assets.xcassets */; };
 		A10000000000000000000001 /* GymCoachApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* GymCoachApp.swift */; };
-		A10000000000000000000021 /* GymCoachWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000024 /* GymCoachWidget.swift */; };
-		A10000000000000000000022 /* GymCoachWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000023 /* GymCoachWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		A10000000000000000000023 /* GymCoachWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GymCoachWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		A10000000000000000000024 /* GymCoachWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymCoachWidget.swift; sourceTree = "<group>"; };
-		A10000000000000000000025 /* GymCoachWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GymCoachWidget.entitlements; sourceTree = "<group>"; };
-		A10000000000000000000026 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000000000000000000002 /* GymCoachApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymCoachApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000003 /* GymCoach.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GymCoach.entitlements; sourceTree = "<group>"; };
 		A10000000000000000000004 /* GymCoach.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GymCoach.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
-/* Begin PBXCopyFilesBuildPhase section */
-		A10000000000000000000035 /* Embed App Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (A10000000000000000000022 /* GymCoachWidget.appex in Embed App Extensions */, );
-			name = "Embed App Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
-
 /* Begin PBXFrameworksBuildPhase section */
-		A10000000000000000000033 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = ();
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		A10000000000000000000005 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -51,21 +27,10 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		A10000000000000000000027 /* GymCoachWidget */ = {
-			isa = PBXGroup;
-			children = (
-				A10000000000000000000024 /* GymCoachWidget.swift */,
-				A10000000000000000000025 /* GymCoachWidget.entitlements */,
-				A10000000000000000000026 /* Info.plist */,
-			);
-			path = GymCoachWidget;
-			sourceTree = "<group>";
-		};
 		A10000000000000000000006 = {
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000007 /* GymCoach */,
-				A10000000000000000000027 /* GymCoachWidget */,
 				A10000000000000000000008 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -84,7 +49,6 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000004 /* GymCoach.app */,
-				A10000000000000000000023 /* GymCoachWidget.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -99,31 +63,13 @@
 				A10000000000000000000011 /* Sources */,
 				A10000000000000000000005 /* Frameworks */,
 				A10000000000000000000012 /* Resources */,
-				A10000000000000000000035 /* Embed App Extensions */,
 			);
 			buildRules = ();
-			dependencies = (
-				A10000000000000000000036 /* PBXTargetDependency */,
-			);
+			dependencies = ();
 			name = GymCoach;
 			productName = GymCoach;
 			productReference = A10000000000000000000004 /* GymCoach.app */;
 			productType = "com.apple.product-type.application";
-		};
-		A10000000000000000000028 /* GymCoachWidget */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = A10000000000000000000029 /* Build configuration list for PBXNativeTarget "GymCoachWidget" */;
-			buildPhases = (
-				A10000000000000000000032 /* Sources */,
-				A10000000000000000000033 /* Frameworks */,
-				A10000000000000000000034 /* Resources */,
-			);
-			buildRules = ();
-			dependencies = ();
-			name = GymCoachWidget;
-			productName = GymCoachWidget;
-			productReference = A10000000000000000000023 /* GymCoachWidget.appex */;
-			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -149,19 +95,9 @@
 			productRefGroup = A10000000000000000000008 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-			targets = (A10000000000000000000009 /* GymCoach */, A10000000000000000000028 /* GymCoachWidget */);
+			targets = (A10000000000000000000009 /* GymCoach */);
 		};
 /* End PBXProject section */
-
-/* Begin PBXContainerItemProxy section */
-		A10000000000000000000037 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = A10000000000000000000013 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = A10000000000000000000028;
-			remoteInfo = GymCoachWidget;
-		};
-/* End PBXContainerItemProxy section */
 
 /* Begin PBXResourcesBuildPhase section */
 		A10000000000000000000012 /* Resources */ = {
@@ -170,12 +106,6 @@
 			files = (
 				A10000000000000000000019 /* Assets.xcassets in Resources */,
 			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A10000000000000000000034 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = ();
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
@@ -187,21 +117,7 @@
 			files = (A10000000000000000000001 /* GymCoachApp.swift in Sources */);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		A10000000000000000000032 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (A10000000000000000000021 /* GymCoachWidget.swift in Sources */, );
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
-
-/* Begin PBXTargetDependency section */
-		A10000000000000000000036 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = A10000000000000000000028 /* GymCoachWidget */;
-			targetProxy = A10000000000000000000037 /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A10000000000000000000015 /* Debug */ = {
@@ -280,40 +196,6 @@
 			};
 			name = Release;
 		};
-		A10000000000000000000030 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = GymCoachWidget/GymCoachWidget.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = GymCoachWidget/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.hty666.gymcoach.widget;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
-			};
-			name = Debug;
-		};
-		A10000000000000000000031 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = GymCoachWidget/GymCoachWidget.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = GymCoachWidget/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.hty666.gymcoach.widget;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -326,12 +208,6 @@
 		A10000000000000000000010 /* Build configuration list for PBXNativeTarget "GymCoach" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (A10000000000000000000017 /* Debug */, A10000000000000000000018 /* Release */);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		A10000000000000000000029 /* Build configuration list for PBXNativeTarget "GymCoachWidget" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (A10000000000000000000030 /* Debug */, A10000000000000000000031 /* Release */);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
