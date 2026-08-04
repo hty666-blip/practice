@@ -1859,7 +1859,7 @@ struct WorkoutHomeView: View {
                             .font(.headline)
                         Text(session.planTitle)
                             .font(.subheadline.weight(.semibold))
-                        Text("(session.date.formatted(date: .abbreviated, time: .omitted)) · (session.exercises.filter(\.completed).count) 个动作完成 · RPE (session.perceivedEffort)/10")
+                        Text("\(session.date.formatted(date: .abbreviated, time: .omitted)) · \(session.exercises.filter(\.completed).count) 个动作完成 · RPE \(session.perceivedEffort)/10")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
