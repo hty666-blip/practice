@@ -2127,7 +2127,6 @@ struct ProgressDashboardView: View {
         }
         .navigationTitle("进度")
         .sheet(isPresented: $showingWeight) { WeightEntryView() }
-        .sheet(isPresented: $health.showingHelp) { HealthStepsHelpView() }
     }
 
     private var trendAdvice: String {
