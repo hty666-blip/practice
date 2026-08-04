@@ -701,7 +701,7 @@ final class HealthManager: ObservableObject {
             let predicate = HKQuery.predicateForSamples(withStart: start, end: Date())
             let descriptor = HKStatisticsQueryDescriptor(predicate: .quantitySample(type: stepType, predicate: predicate), options: .cumulativeSum)
             let result = try await descriptor.result(for: healthStore)
-            steps = Int(result.sumQuantity()?.doubleValue(for: .count()) ?? 0)
+            steps = Int(result?.sumQuantity()?.doubleValue(for: .count()) ?? 0)
             errorMessage = nil
         } catch {
             errorMessage = "未能读取步数，可在健康 App 授权后重试。"
