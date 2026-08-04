@@ -715,7 +715,7 @@ struct RootView: View {
     var body: some View {
         TabView {
             NavigationStack { TodayView() }
-                .tabItem { Label("今日", systemImage: "sun.max.fill") }
+                .tabItem { Label("今日", systemImage: "checkmark.seal.fill") }
             NavigationStack { FoodHomeView() }
                 .tabItem { Label("饮食", systemImage: "fork.knife") }
             NavigationStack { WorkoutHomeView() }
@@ -726,46 +726,126 @@ struct RootView: View {
                 .tabItem { Label("进度", systemImage: "chart.line.uptrend.xyaxis") }
         }
         .tint(.green)
-        .dynamicTypeSize(.xSmall ... .large)
     }
 }
-
 struct TodayView: View {
     @EnvironmentObject private var store: FitnessStore
     @StateObject private var health = HealthManager()
     @State private var showingWeight = false
 
+    private var todayLabel: String {
+        Date.now.formatted(.dateTime.month(.wide).day().weekday(.wide))
+    }
+
+    private var remainingCalories: Int {
+        max(store.profile.dailyCaloriesGoal - store.todayNutrition.calories, 0)
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("今天，先完成一件事")
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.78)
-                    Text("不追求完美；按计划出现，就在变强。")
+            LazyVStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(todayLabel)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Text("今天，练得刚刚好")
+                        .font(.largeTitle.weight(.bold))
+                        .tracking(-0.6)
+                    Text("完成最小的一步，身体会记住。")
+                        .font(.body)
                         .foregroundStyle(.secondary)
                 }
+                .padding(.top, 8)
 
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                    MetricCard(title: "最新体重", value: store.currentWeight.map { String(format: "%.1f kg", $0) } ?? "去记录", icon: "scalemass.fill", color: .blue) {
+                HStack(spacing: 0) {
+                    TodayMetric(
+                        title: "最新体重",
+                        value: store.currentWeight.map { String(format: "%.1f kg", $0) } ?? "去记录",
+                        icon: "scalemass.fill",
+                        tint: .blue
+                    ) {
                         showingWeight = true
                     }
-                    MetricCard(title: "今日步数", value: "\(health.steps)", icon: "figure.walk", color: .orange) {
+
+                    Divider()
+                        .padding(.vertical, 4)
+
+                    TodayMetric(
+                        title: "今日步数",
+                        value: health.steps == 0 ? "同步步数" : "\(health.steps)",
+                        icon: "figure.walk",
+                        tint: .orange
+                    ) {
                         Task { await health.refreshSteps() }
                     }
                 }
+                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color(uiColor: .separator).opacity(0.28), lineWidth: 0.5)
+                }
 
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Label("今日营养", systemImage: "chart.pie.fill")
-                            .font(.headline)
-                        Spacer()
-                        Text("\(store.todayNutrition.calories) / \(store.profile.dailyCaloriesGoal) kcal")
-                            .font(.subheadline.weight(.semibold))
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Label("下一步训练", systemImage: "bolt.fill")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.green)
+                            Text(store.todayPlan.title)
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(.primary)
+                        }
+                        Spacer(minLength: 12)
+                        Text("今天")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
-                    NutrientProgress(title: "热量", value: store.todayNutrition.calories, target: store.profile.dailyCaloriesGoal, unit: "kcal", color: .orange)
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+
+                    Text(store.todayPlan.subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    if let cardio = store.todayPlan.cardio {
+                        Label(cardio, systemImage: "figure.walk")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    NavigationLink { WorkoutSessionView(plan: store.todayPlan) } label: {
+                        Label("开始训练", systemImage: "play.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(.green)
+                }
+                .cardStyle()
+
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("今日燃料")
+                                .font(.headline)
+                            Text(remainingCalories > 0 ? "还可吃约 \(remainingCalories) kcal" : "今日热量已达目标")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        NavigationLink { FoodHomeView() } label: {
+                            Text("查看饮食")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                    }
+
+                    NutrientProgress(
+                        title: "热量",
+                        value: store.todayNutrition.calories,
+                        target: store.profile.dailyCaloriesGoal,
+                        unit: "kcal",
+                        color: .orange
+                    )
+
+                    HStack(spacing: 12) {
                         MacroValue(title: "蛋白质", value: store.todayNutrition.protein, target: store.profile.dailyProteinGoal, color: .green)
                         MacroValue(title: "碳水", value: store.todayNutrition.carbs, target: nil, color: .blue)
                         MacroValue(title: "脂肪", value: store.todayNutrition.fat, target: nil, color: .pink)
@@ -773,49 +853,39 @@ struct TodayView: View {
                 }
                 .cardStyle()
 
-                DailyCheckInCard(healthSteps: health.steps)
-
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Label("今天吃什么", systemImage: "fork.knife")
+                        Text("饮食记录")
                             .font(.headline)
                         Spacer()
                         NavigationLink("去记录") { FoodHomeView() }
                             .font(.subheadline.weight(.semibold))
                     }
+
                     ForEach(MealType.allCases) { type in
                         NavigationLink { MealLogEditor(initialType: type) } label: {
                             MealStatusRow(type: type, meal: store.meal(for: type))
+                                .padding(.vertical, 7)
                         }
                         .buttonStyle(.plain)
+
+                        if type != MealType.allCases.last! {
+                            Divider()
+                                .padding(.leading, 36)
+                        }
                     }
                 }
                 .cardStyle()
 
-                VStack(alignment: .leading, spacing: 9) {
-                    Label("今日训练", systemImage: "dumbbell.fill")
-                        .font(.headline)
-                    Text(store.todayPlan.title).font(.title3.bold())
-                    Text(store.todayPlan.subtitle).foregroundStyle(.secondary)
-                    if let cardio = store.todayPlan.cardio {
-                        Label(cardio, systemImage: "figure.walk")
-                            .font(.subheadline)
-                            .foregroundStyle(.green)
-                    }
-                    NavigationLink { WorkoutSessionView(plan: store.todayPlan) } label: {
-                        Text("开始今天的训练")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.green)
-                }
-                .cardStyle()
-
+                DailyCheckInCard(healthSteps: health.steps)
                 CoachAdviceCard()
             }
-            .padding()
+            .padding(.horizontal, 20)
+            .padding(.bottom, 32)
         }
+        .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("练了么")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink { SettingsView() } label: {
@@ -830,6 +900,35 @@ struct TodayView: View {
     }
 }
 
+struct TodayMetric: View {
+    let title: String
+    let value: String
+    let icon: String
+    let tint: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 7) {
+                Image(systemName: icon)
+                    .font(.headline)
+                    .foregroundStyle(tint)
+                Text(value)
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
+            .padding(16)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("轻点更新或记录")
+    }
+}
 struct MetricCard: View {
     let title: String
     let value: String
@@ -1923,8 +2022,11 @@ struct NewReminderView: View {
 
 extension View {
     func cardStyle() -> some View {
-        padding(14)
-            .background(Color(uiColor: .secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+        padding(16)
+            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color(uiColor: .separator).opacity(0.28), lineWidth: 0.5)
+            }
     }
 }

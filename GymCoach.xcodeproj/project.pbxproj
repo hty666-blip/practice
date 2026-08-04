@@ -6,6 +6,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A10000000000000000000019 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000020 /* Assets.xcassets */; };
 		A10000000000000000000001 /* GymCoachApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* GymCoachApp.swift */; };
 /* End PBXBuildFile section */
 
@@ -13,6 +14,7 @@
 		A10000000000000000000002 /* GymCoachApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymCoachApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000003 /* GymCoach.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GymCoach.entitlements; sourceTree = "<group>"; };
 		A10000000000000000000004 /* GymCoach.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = GymCoach.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -38,6 +40,7 @@
 			children = (
 				A10000000000000000000002 /* GymCoachApp.swift */,
 				A10000000000000000000003 /* GymCoach.entitlements */,
+				A10000000000000000000020 /* Assets.xcassets */,
 			);
 			path = GymCoach;
 			sourceTree = "<group>";
@@ -100,7 +103,9 @@
 		A10000000000000000000012 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (
+				A10000000000000000000019 /* Assets.xcassets in Resources */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
@@ -148,6 +153,7 @@
 		A10000000000000000000017 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = GymCoach/GymCoach.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -170,6 +176,7 @@
 		A10000000000000000000018 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = GymCoach/GymCoach.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
