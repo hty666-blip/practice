@@ -429,13 +429,71 @@ struct ChatMessage: Codable, Identifiable {
     var content: String
 }
 
+struct CoachMemory: Codable, Identifiable {
+    var id = UUID()
+    var createdAt = Date()
+    var category: String
+    var content: String
+}
+
+struct CoachCapability: Identifiable {
+    let id: String
+    let category: String
+    let title: String
+    let detail: String
+    let actionName: String?
+
+    static let all: [CoachCapability] = [
+        CoachCapability(id: "read-profile", category: "读取与分析", title: "个人资料与目标", detail: "读取身高、体重、目标、训练经验、器械和体态重点。", actionName: nil),
+        CoachCapability(id: "read-history", category: "读取与分析", title: "完整健身记录", detail: "读取近期饮食、营养、体重、打卡、训练记录和长期记忆。", actionName: nil),
+        CoachCapability(id: "weekly-review", category: "读取与分析", title: "每周完成分析", detail: "比较计划与实际完成情况、营养均值和体重趋势。", actionName: nil),
+        CoachCapability(id: "record-meal", category: "记录", title: "新增或修改饮食", detail: "估算并保存一餐的热量、蛋白质、碳水和脂肪。", actionName: "record_meal"),
+        CoachCapability(id: "meal-photo", category: "读取与分析", title: "识别餐食照片", detail: "使用支持视觉的模型时，在 AI 教练中上传图片并估算营养。", actionName: nil),
+        CoachCapability(id: "delete-meal", category: "记录", title: "删除饮食", detail: "按餐次删除今天的一条饮食记录。", actionName: "delete_meal"),
+        CoachCapability(id: "record-workout", category: "记录", title: "记录训练", detail: "保存动作、时长、RPE、有氧坡度/速度和估算消耗。", actionName: "record_workout"),
+        CoachCapability(id: "delete-workout", category: "记录", title: "撤销最近训练", detail: "删除最近一次训练记录。", actionName: "delete_latest_workout"),
+        CoachCapability(id: "record-weight", category: "记录", title: "记录体重与腰围", detail: "新增或更新当天体重、腰围。", actionName: "record_weight"),
+        CoachCapability(id: "delete-weight", category: "记录", title: "撤销最近体重", detail: "删除最近一条体重记录。", actionName: "delete_latest_weight"),
+        CoachCapability(id: "checkin", category: "记录", title: "今日打卡", detail: "更新饮水、睡眠和手动步数。", actionName: "record_checkin"),
+        CoachCapability(id: "profile", category: "目标与计划", title: "修改目标与训练条件", detail: "修改减脂/维持/增肌、目标体重、每周天数和单次时长。", actionName: "update_profile"),
+        CoachCapability(id: "nutrition", category: "目标与计划", title: "修改营养目标", detail: "切换自动计算，或设置每日热量与蛋白质目标。", actionName: "update_nutrition_targets"),
+        CoachCapability(id: "day-plan", category: "目标与计划", title: "修改某一天计划", detail: "结合完成率更换当天标题、动作、组次提示和有氧。", actionName: "update_day_plan"),
+        CoachCapability(id: "week-plan", category: "目标与计划", title: "替换整周计划", detail: "结合近几周完成情况重排 7 天训练与恢复。", actionName: "replace_weekly_plan"),
+        CoachCapability(id: "generate-plan", category: "目标与计划", title: "重新生成周计划", detail: "按当前资料调用 AI 生成新的 7 天计划。", actionName: "regenerate_weekly_plan"),
+        CoachCapability(id: "reset-plan", category: "目标与计划", title: "恢复基础周计划", detail: "清除 AI 调整，恢复按个人资料生成的基础计划。", actionName: "reset_weekly_plan"),
+        CoachCapability(id: "reminder-add", category: "提醒", title: "新增提醒", detail: "新增训练、饮食、称重或休息提醒。", actionName: "add_reminder"),
+        CoachCapability(id: "reminder-update", category: "提醒", title: "修改提醒", detail: "按名称修改提醒内容和时间。", actionName: "update_reminder"),
+        CoachCapability(id: "reminder-delete", category: "提醒", title: "删除提醒", detail: "按名称删除已有提醒。", actionName: "delete_reminder"),
+        CoachCapability(id: "remember", category: "记忆", title: "记住长期信息", detail: "保存工作时间、休息日、饮食偏好、伤病限制和训练习惯。", actionName: "remember"),
+        CoachCapability(id: "forget", category: "记忆", title: "忘记长期信息", detail: "按关键词删除不再正确的记忆。", actionName: "forget_memory")
+    ]
+
+    static var promptRegistry: String {
+        all.compactMap { capability in
+            capability.actionName.map { "\($0)：\(capability.title)（\(capability.detail)）" }
+        }.joined(separator: "\n")
+    }
+}
+
 enum CoachActionType: String, Decodable {
     case recordMeal = "record_meal"
+    case deleteMeal = "delete_meal"
     case recordWorkout = "record_workout"
+    case deleteLatestWorkout = "delete_latest_workout"
     case recordWeight = "record_weight"
+    case deleteLatestWeight = "delete_latest_weight"
     case recordCheckIn = "record_checkin"
     case updateProfile = "update_profile"
+    case updateNutritionTargets = "update_nutrition_targets"
+    case updateDayPlan = "update_day_plan"
+    case replaceWeeklyPlan = "replace_weekly_plan"
     case regenerateWeeklyPlan = "regenerate_weekly_plan"
+    case resetWeeklyPlan = "reset_weekly_plan"
+    case addReminder = "add_reminder"
+    case updateReminder = "update_reminder"
+    case deleteReminder = "delete_reminder"
+    case remember = "remember"
+    case forgetMemory = "forget_memory"
 }
 
 struct CoachAction: Decodable, Identifiable {
@@ -462,6 +520,20 @@ struct CoachAction: Decodable, Identifiable {
     var fitnessGoal: String?
     var goalWeightKilograms: Double?
     var trainingDaysPerWeek: Int?
+    var preferredSessionMinutes: Int?
+    var useRecommendedNutrition: Bool?
+    var dailyCaloriesGoal: Int?
+    var dailyProteinGoal: Int?
+    var weekday: Int?
+    var dayPlan: WorkoutPlan?
+    var weeklyPlans: [WorkoutPlan]?
+    var reminderTitle: String?
+    var reminderBody: String?
+    var reminderHour: Int?
+    var reminderMinute: Int?
+    var memoryCategory: String?
+    var memoryContent: String?
+    var memoryKeyword: String?
 
     private enum CodingKeys: String, CodingKey {
         case type, mealType, description, calories, protein, carbs, fat
@@ -469,27 +541,79 @@ struct CoachAction: Decodable, Identifiable {
         case workoutTitle, workoutMinutes, cardioMinutes, cardioInclinePercent
         case cardioSpeedKilometersPerHour, effort, exercises
         case fitnessGoal, goalWeightKilograms, trainingDaysPerWeek
+        case preferredSessionMinutes, useRecommendedNutrition, dailyCaloriesGoal, dailyProteinGoal
+        case weekday, dayPlan, weeklyPlans
+        case reminderTitle, reminderBody, reminderHour, reminderMinute
+        case memoryCategory, memoryContent, memoryKeyword
     }
 
     var title: String {
         switch type {
         case .recordMeal: return "记录饮食"
+        case .deleteMeal: return "删除饮食"
         case .recordWorkout: return "记录训练"
+        case .deleteLatestWorkout: return "撤销最近训练"
         case .recordWeight: return "记录体重"
+        case .deleteLatestWeight: return "撤销最近体重"
         case .recordCheckIn: return "更新今日打卡"
         case .updateProfile: return "更新个人目标"
+        case .updateNutritionTargets: return "更新营养目标"
+        case .updateDayPlan: return "调整单日计划"
+        case .replaceWeeklyPlan: return "替换整周计划"
         case .regenerateWeeklyPlan: return "生成新的周计划"
+        case .resetWeeklyPlan: return "恢复基础周计划"
+        case .addReminder: return "新增提醒"
+        case .updateReminder: return "修改提醒"
+        case .deleteReminder: return "删除提醒"
+        case .remember: return "加入长期记忆"
+        case .forgetMemory: return "删除长期记忆"
         }
     }
 
     var detail: String {
         switch type {
         case .recordMeal: return "\(description ?? "一餐") · \(calories ?? 0) kcal · 蛋白质 \(protein ?? 0)g"
+        case .deleteMeal: return "删除今天的\(resolvedMealType.rawValue)记录"
         case .recordWorkout: return "\(workoutTitle ?? "今日训练") · \(workoutMinutes ?? 0) 分钟"
+        case .deleteLatestWorkout: return "删除最近一次训练记录"
         case .recordWeight: return "\(weightKilograms.map { String(format: "%.1f", $0) } ?? "—") kg"
+        case .deleteLatestWeight: return "删除最近一条体重记录"
         case .recordCheckIn: return "饮水 \(waterGlasses ?? 0) 杯 · 睡眠 \(sleepHours.map { String(format: "%.1f", $0) } ?? "—") 小时 · 步数 \(steps ?? 0)"
-        case .updateProfile: return "目标 \(fitnessGoal ?? "保持不变") · 目标体重 \(goalWeightKilograms.map { String(format: "%.1f", $0) } ?? "保持不变") kg"
+        case .updateProfile: return "目标 \(fitnessGoal ?? "保持不变") · 目标体重 \(goalWeightKilograms.map { String(format: "%.1f", $0) } ?? "保持不变") kg · 每周 \(trainingDaysPerWeek.map { String($0) } ?? "不变") 天 · 每次 \(preferredSessionMinutes.map { String($0) } ?? "不变") 分钟"
+        case .updateNutritionTargets: return useRecommendedNutrition == true ? "改为按个人资料自动计算" : "每日 \(dailyCaloriesGoal ?? 0) kcal · 蛋白质 \(dailyProteinGoal ?? 0)g"
+        case .updateDayPlan: return "周\(Self.chineseWeekday(weekday ?? dayPlan?.weekday ?? 1)) · \(dayPlan?.title ?? workoutTitle ?? "训练计划")"
+        case .replaceWeeklyPlan: return "根据完成情况替换 7 天计划"
         case .regenerateWeeklyPlan: return "根据当前个人资料重新生成 7 天训练安排"
+        case .resetWeeklyPlan: return "清除 AI 调整并恢复基础计划"
+        case .addReminder: return "\(reminderTitle ?? "新提醒") · \(String(format: "%02d:%02d", reminderHour ?? 20, reminderMinute ?? 0))"
+        case .updateReminder: return "修改“\(reminderTitle ?? "指定")”至 \(String(format: "%02d:%02d", reminderHour ?? 20, reminderMinute ?? 0))"
+        case .deleteReminder: return "删除“\(reminderTitle ?? "指定")”提醒"
+        case .remember: return "\(memoryCategory ?? "其他") · \(memoryContent ?? "")"
+        case .forgetMemory: return "删除包含“\(memoryKeyword ?? "指定内容")”的记忆"
+        }
+    }
+
+    private static func chineseWeekday(_ weekday: Int) -> String {
+        ["日", "一", "二", "三", "四", "五", "六"][min(7, max(1, weekday)) - 1]
+    }
+
+    var isDestructive: Bool {
+        switch type {
+        case .deleteMeal, .deleteLatestWorkout, .deleteLatestWeight, .deleteReminder, .forgetMemory:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var planPreviewLines: [String] {
+        let plans: [WorkoutPlan]
+        if let weeklyPlans { plans = weeklyPlans.sorted { $0.weekday < $1.weekday } }
+        else if let dayPlan { plans = [dayPlan] }
+        else { return [] }
+        return plans.map { plan in
+            let content = plan.exercises.isEmpty ? "恢复" : plan.exercises.map(\.name).joined(separator: "、")
+            return "周\(Self.chineseWeekday(plan.weekday))：\(plan.title) · \(content)"
         }
     }
 
@@ -538,6 +662,7 @@ final class FitnessStore: ObservableObject {
     @Published private(set) var sessions: [WorkoutSession]
     @Published private(set) var chatMessages: [ChatMessage]
     @Published private(set) var aiWorkoutPlans: [WorkoutPlan]
+    @Published private(set) var coachMemories: [CoachMemory]
     @Published var profile: FitnessProfile { didSet { save(profile, key: Keys.profile) } }
     @Published var aiConfiguration: AIConfiguration { didSet { save(aiConfiguration, key: Keys.aiConfiguration) } }
     @Published var reminders: [ReminderItem] { didSet { save(reminders, key: Keys.reminders) } }
@@ -549,6 +674,7 @@ final class FitnessStore: ObservableObject {
         static let sessions = "gymcoach.sessions.v2"
         static let chatMessages = "gymcoach.chat.v2"
         static let aiWorkoutPlans = "gymcoach.aiWorkoutPlans.v1"
+        static let coachMemories = "gymcoach.coachMemories.v1"
         static let profile = "gymcoach.profile.v2"
         static let aiConfiguration = "gymcoach.ai.v2"
         static let reminders = "gymcoach.reminders.v2"
@@ -561,6 +687,7 @@ final class FitnessStore: ObservableObject {
         sessions = Self.load([WorkoutSession].self, key: Keys.sessions) ?? []
         chatMessages = Self.load([ChatMessage].self, key: Keys.chatMessages) ?? []
         aiWorkoutPlans = Self.load([WorkoutPlan].self, key: Keys.aiWorkoutPlans) ?? []
+        coachMemories = Self.load([CoachMemory].self, key: Keys.coachMemories) ?? []
         profile = Self.load(FitnessProfile.self, key: Keys.profile) ?? FitnessProfile()
         aiConfiguration = Self.load(AIConfiguration.self, key: Keys.aiConfiguration) ?? AIConfiguration()
         reminders = Self.load([ReminderItem].self, key: Keys.reminders) ?? ReminderItem.defaults
@@ -694,6 +821,18 @@ final class FitnessStore: ObservableObject {
         save(sessions, key: Keys.sessions)
     }
 
+    func deleteLatestSession() {
+        guard !sessions.isEmpty else { return }
+        sessions.removeFirst()
+        save(sessions, key: Keys.sessions)
+    }
+
+    func deleteLatestWeight() {
+        guard !weights.isEmpty else { return }
+        weights.removeFirst()
+        save(weights, key: Keys.weights)
+    }
+
     func resetPersonalizedWorkoutPlan() {
         aiWorkoutPlans = []
         save(aiWorkoutPlans, key: Keys.aiWorkoutPlans)
@@ -710,6 +849,7 @@ final class FitnessStore: ObservableObject {
         let plans = try await AIService.generateWeeklyPlan(
             profile: profile,
             currentWeight: currentWeight ?? profile.startingWeight,
+            adaptationContext: coachContext,
             configuration: aiConfiguration,
             apiKey: apiKey
         )
@@ -740,15 +880,120 @@ final class FitnessStore: ObservableObject {
         save(chatMessages, key: Keys.chatMessages)
     }
 
+    func addMemory(category: String, content: String) {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        coachMemories.removeAll { $0.content.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }
+        coachMemories.insert(CoachMemory(category: category.isEmpty ? "其他" : category, content: trimmed), at: 0)
+        coachMemories = Array(coachMemories.prefix(60))
+        save(coachMemories, key: Keys.coachMemories)
+    }
+
+    func deleteMemory(_ memory: CoachMemory) {
+        coachMemories.removeAll { $0.id == memory.id }
+        save(coachMemories, key: Keys.coachMemories)
+    }
+
+    func deleteMemories(matching keyword: String) -> Int {
+        let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return 0 }
+        let oldCount = coachMemories.count
+        coachMemories.removeAll {
+            $0.content.localizedCaseInsensitiveContains(trimmed) || $0.category.localizedCaseInsensitiveContains(trimmed)
+        }
+        save(coachMemories, key: Keys.coachMemories)
+        return oldCount - coachMemories.count
+    }
+
+    private var recentConversationContext: String {
+        let recent = chatMessages.suffix(12)
+        guard !recent.isEmpty else { return "无" }
+        return recent.map { "\($0.isUser ? "用户" : "教练")：\($0.content)" }.joined(separator: "\n")
+    }
+
+    private var memoryContext: String {
+        guard !coachMemories.isEmpty else { return "暂无长期记忆" }
+        return coachMemories.prefix(30).map { "[\($0.category)] \($0.content)" }.joined(separator: "；")
+    }
+
+    private var planContext: String {
+        let dayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
+        return weeklyPlans.sorted { $0.weekday < $1.weekday }.map { plan in
+            let exercises = plan.exercises.isEmpty ? "恢复" : plan.exercises.map { "\($0.name) \($0.target)" }.joined(separator: "、")
+            return "\(dayNames[plan.weekday - 1]) \(plan.title)：\(exercises)；有氧：\(plan.cardio ?? "无")"
+        }.joined(separator: "\n")
+    }
+
+    private var trainingAdherenceContext: String {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let dayNames = ["日", "一", "二", "三", "四", "五", "六"]
+        return (0..<4).compactMap { weeksAgo -> String? in
+            guard let reference = calendar.date(byAdding: .weekOfYear, value: -weeksAgo, to: today),
+                  let interval = calendar.dateInterval(of: .weekOfYear, for: reference) else { return nil }
+            var due = 0
+            var completed = 0
+            var daily: [String] = []
+            for offset in 0..<7 {
+                guard let date = calendar.date(byAdding: .day, value: offset, to: interval.start), date <= today else { continue }
+                let weekday = calendar.component(.weekday, from: date)
+                guard let plan = weeklyPlans.first(where: { $0.weekday == weekday }), !plan.exercises.isEmpty else { continue }
+                due += 1
+                let done = sessions.contains { calendar.isDate($0.date, inSameDayAs: date) }
+                if done { completed += 1 }
+                daily.append("周\(dayNames[weekday - 1])\(done ? "✓" : "未完成")")
+            }
+            let rate = due == 0 ? 0 : Int((Double(completed) / Double(due) * 100).rounded())
+            return "\(weeksAgo == 0 ? "本周" : "前\(weeksAgo)周")：到目前应完成 \(due) 次，实际 \(completed) 次，完成率 \(rate)%（\(daily.joined(separator: "、"))）"
+        }.joined(separator: "\n")
+    }
+
+    private var recentTrendContext: String {
+        let calendar = Calendar.current
+        let today = Date()
+        let sevenDaysAgo = calendar.date(byAdding: .day, value: -6, to: today) ?? today
+        let recentMeals = meals.filter { $0.date >= calendar.startOfDay(for: sevenDaysAgo) }
+        let grouped = Dictionary(grouping: recentMeals) { calendar.startOfDay(for: $0.date) }
+        let dayTotals = grouped.values.map { $0.reduce(NutritionEstimate.empty) { $0.adding($1.nutrition) } }
+        let nutritionText: String
+        if dayTotals.isEmpty {
+            nutritionText = "近 7 天无饮食记录"
+        } else {
+            let count = dayTotals.count
+            let calories = dayTotals.map(\.calories).reduce(0, +) / count
+            let protein = dayTotals.map(\.protein).reduce(0, +) / count
+            nutritionText = "近 7 天有 \(count) 天记录饮食，记录日均 \(calories) kcal、蛋白质 \(protein)g"
+        }
+        let monthAgo = calendar.date(byAdding: .day, value: -28, to: today) ?? today
+        let recentWeights = weights.filter { $0.date >= monthAgo }.sorted { $0.date < $1.date }
+        let weightText: String
+        if let first = recentWeights.first, let last = recentWeights.last, recentWeights.count >= 2 {
+            weightText = "近 28 天体重 \(String(format: "%.1f", first.kilograms)) → \(String(format: "%.1f", last.kilograms)) kg（变化 \(String(format: "%+.1f", last.kilograms - first.kilograms)) kg）"
+        } else {
+            weightText = "近 28 天体重趋势数据不足"
+        }
+        return "\(nutritionText)；\(weightText)"
+    }
+
     var coachContext: String {
         let nutrition = todayNutrition
         let targets = nutritionTargets
         let weightText = currentWeight.map { String(format: "%.1f", $0) } ?? "未记录"
         let mealsText = todayMeals.isEmpty ? "无" : todayMeals.map { "\($0.type.rawValue)：\($0.description)（\($0.nutrition.calories)kcal，蛋白质\($0.nutrition.protein)g）" }.joined(separator: "；")
         let checkIn = todayCheckIn
-        let planText = todayPlan.exercises.isEmpty ? "恢复日" : todayPlan.exercises.map { "\($0.name) \($0.target)" }.joined(separator: "、")
-        let recentSessions = sessions.prefix(3).map { "\($0.date.formatted(date: .abbreviated, time: .omitted)) \($0.planTitle)，\($0.durationMinutes) 分钟，\($0.exercises.filter(\.completed).count) 个动作完成" }.joined(separator: "；")
-        return "用户资料：\(profile.age) 岁\(profile.sex.rawValue)，身高 \(Int(profile.heightCentimeters))cm，当前体重 \(weightText)kg，目标 \(profile.fitnessGoal.rawValue)，目标体重 \(String(format: "%.1f", profile.currentWeightGoal))kg。训练：\(profile.trainingDaysPerWeek) 天/周，每次约 \(profile.preferredSessionMinutes) 分钟，\(profile.trainingExperience.rawValue)，器械：\(profile.equipmentAccess.rawValue)，体态优先：\(profile.posturePriority ? "是" : "否")。今日已记录饮食：\(mealsText)。今日营养：\(nutrition.calories) kcal，蛋白质 \(nutrition.protein)g，碳水 \(nutrition.carbs)g，脂肪 \(nutrition.fat)g；目标：\(targets.calories) kcal、蛋白质 \(targets.protein)g、碳水 \(targets.carbs)g、脂肪 \(targets.fat)g。今日打卡：饮水 \(checkIn.waterGlasses) 杯，睡眠 \(checkIn.sleepHours.map { String(format: "%.1f", $0) } ?? "未记") 小时，步数 \(checkIn.steps.map { String($0) } ?? "未记")。今天计划：\(todayPlan.title)：\(planText)。最近训练：\(recentSessions.isEmpty ? "无" : recentSessions)。"
+        return """
+        用户资料：\(profile.age) 岁\(profile.sex.rawValue)，身高 \(Int(profile.heightCentimeters))cm，当前体重 \(weightText)kg，目标 \(profile.fitnessGoal.rawValue)，目标体重 \(String(format: "%.1f", profile.currentWeightGoal))kg。每周训练 \(profile.trainingDaysPerWeek) 天，每次约 \(profile.preferredSessionMinutes) 分钟，\(profile.trainingExperience.rawValue)，器械：\(profile.equipmentAccess.rawValue)，体态优先：\(profile.posturePriority ? "是" : "否")。
+        长期记忆：\(memoryContext)
+        今日饮食：\(mealsText)。今日营养：\(nutrition.calories)/\(targets.calories) kcal，蛋白质 \(nutrition.protein)/\(targets.protein)g，碳水 \(nutrition.carbs)/\(targets.carbs)g，脂肪 \(nutrition.fat)/\(targets.fat)g。
+        今日打卡：饮水 \(checkIn.waterGlasses) 杯，睡眠 \(checkIn.sleepHours.map { String(format: "%.1f", $0) } ?? "未记") 小时，步数 \(checkIn.steps.map { String($0) } ?? "未记")。
+        当前整周计划：
+        \(planContext)
+        近 4 周训练执行：
+        \(trainingAdherenceContext)
+        近期趋势：\(recentTrendContext)
+        最近对话：
+        \(recentConversationContext)
+        """
     }
 
     func applyCoachAction(_ action: CoachAction) async throws {
@@ -756,6 +1001,9 @@ final class FitnessStore: ObservableObject {
         case .recordMeal:
             guard let calories = action.calories, let protein = action.protein, let carbs = action.carbs, let fat = action.fat, calories > 0, protein >= 0, carbs >= 0, fat >= 0 else { throw AIService.AIError.requestFailed("AI 没有给出完整的营养数据，请补充食物和大概份量后再试。") }
             upsertMeal(MealLog(type: action.resolvedMealType, description: action.description ?? "AI 记录的一餐", nutrition: NutritionEstimate(calories: calories, protein: protein, carbs: carbs, fat: fat, confidence: 0.65, note: "由 AI 教练根据对话估算，请按实际份量复核。"), imageData: nil, source: .ai))
+        case .deleteMeal:
+            guard let meal = meal(for: action.resolvedMealType) else { throw AIService.AIError.requestFailed("今天没有这条餐次记录。") }
+            deleteMeal(meal)
         case .recordWorkout:
             let plan = todayPlan
             let completedNames = action.exercises ?? []
@@ -770,9 +1018,15 @@ final class FitnessStore: ObservableObject {
             let speed = action.cardioSpeedKilometersPerHour.map { "，速度 \(String(format: "%.1f", $0)) km/h" } ?? ""
             let cardioNote = cardio > 0 ? "有氧 \(cardio) 分钟\(incline)\(speed)。" : ""
             addSession(WorkoutSession(planID: plan.id, planTitle: action.workoutTitle ?? plan.title, exercises: logs, cardioMinutes: cardio, cardioInclinePercent: action.cardioInclinePercent, cardioSpeedKilometersPerHour: action.cardioSpeedKilometersPerHour, estimatedCalories: estimated, perceivedEffort: min(10, max(1, action.effort ?? 7)), note: "AI 对话记录。\(cardioNote)\(action.description ?? "")", durationMinutes: duration))
+        case .deleteLatestWorkout:
+            guard !sessions.isEmpty else { throw AIService.AIError.requestFailed("还没有训练记录可以删除。") }
+            deleteLatestSession()
         case .recordWeight:
             guard let weight = action.weightKilograms, weight > 25, weight < 350 else { throw AIService.AIError.requestFailed("AI 没有识别到有效体重，请按“体重 87kg”这样补充。") }
             addWeight(kilograms: weight, waist: action.waistCentimeters)
+        case .deleteLatestWeight:
+            guard !weights.isEmpty else { throw AIService.AIError.requestFailed("还没有体重记录可以删除。") }
+            deleteLatestWeight()
         case .recordCheckIn:
             let current = todayCheckIn
             updateTodayCheckIn(water: max(0, action.waterGlasses ?? current.waterGlasses), sleepHours: action.sleepHours ?? current.sleepHours, steps: action.steps ?? current.steps)
@@ -780,8 +1034,75 @@ final class FitnessStore: ObservableObject {
             if let rawGoal = action.fitnessGoal { profile.fitnessGoal = FitnessGoal.allCases.first(where: { $0.rawValue == rawGoal }) ?? profile.fitnessGoal }
             if let weight = action.goalWeightKilograms, weight > 25, weight < 350 { profile.currentWeightGoal = weight }
             if let days = action.trainingDaysPerWeek { profile.trainingDaysPerWeek = min(6, max(1, days)) }
+            if let minutes = action.preferredSessionMinutes { profile.preferredSessionMinutes = min(180, max(20, minutes)) }
+        case .updateNutritionTargets:
+            if action.useRecommendedNutrition == true {
+                profile.usesRecommendedNutrition = true
+            } else {
+                guard let calories = action.dailyCaloriesGoal, let protein = action.dailyProteinGoal,
+                      (1200...5000).contains(calories), (40...350).contains(protein) else {
+                    throw AIService.AIError.requestFailed("营养目标不完整或超出合理录入范围。")
+                }
+                profile.usesRecommendedNutrition = false
+                profile.dailyCaloriesGoal = calories
+                profile.dailyProteinGoal = protein
+            }
+        case .updateDayPlan:
+            guard var plan = action.dayPlan else { throw AIService.AIError.requestFailed("AI 没有返回完整的单日训练计划。") }
+            let targetWeekday = min(7, max(1, action.weekday ?? plan.weekday))
+            plan.weekday = targetWeekday
+            plan.id = "ai-adjusted-\(targetWeekday)-\(Int(Date().timeIntervalSince1970))"
+            var plans = weeklyPlans
+            plans.removeAll { $0.weekday == targetWeekday }
+            plans.append(plan)
+            saveAIWorkoutPlans(plans)
+        case .replaceWeeklyPlan:
+            guard let plans = action.weeklyPlans, plans.count == 7, Set(plans.map(\.weekday)).count == 7 else {
+                throw AIService.AIError.requestFailed("AI 返回的整周计划不完整。")
+            }
+            if let days = action.trainingDaysPerWeek { profile.trainingDaysPerWeek = min(6, max(1, days)) }
+            saveAIWorkoutPlans(plans)
         case .regenerateWeeklyPlan:
             try await generateAIWorkoutPlan()
+        case .resetWeeklyPlan:
+            resetPersonalizedWorkoutPlan()
+        case .addReminder:
+            guard let title = action.reminderTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else {
+                throw AIService.AIError.requestFailed("提醒名称不能为空。")
+            }
+            let hour = min(23, max(0, action.reminderHour ?? 20))
+            let minute = min(59, max(0, action.reminderMinute ?? 0))
+            var updated = reminders
+            updated.append(ReminderItem(title: title, body: action.reminderBody ?? "来自 AI 教练的提醒", hour: hour, minute: minute, enabled: true))
+            try await NotificationManager.requestAndSchedule(updated)
+            reminders = updated
+        case .updateReminder:
+            guard let title = action.reminderTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty,
+                  let index = reminders.firstIndex(where: { $0.title.localizedCaseInsensitiveContains(title) }) else {
+                throw AIService.AIError.requestFailed("没有找到要修改的提醒。")
+            }
+            var updated = reminders
+            if let body = action.reminderBody { updated[index].body = body }
+            if let hour = action.reminderHour { updated[index].hour = min(23, max(0, hour)) }
+            if let minute = action.reminderMinute { updated[index].minute = min(59, max(0, minute)) }
+            try await NotificationManager.requestAndSchedule(updated)
+            reminders = updated
+        case .deleteReminder:
+            guard let title = action.reminderTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else {
+                throw AIService.AIError.requestFailed("请说明要删除哪个提醒。")
+            }
+            var updated = reminders
+            updated.removeAll { $0.title.localizedCaseInsensitiveContains(title) }
+            guard updated.count != reminders.count else { throw AIService.AIError.requestFailed("没有找到名称包含“\(title)”的提醒。") }
+            try await NotificationManager.requestAndSchedule(updated)
+            reminders = updated
+        case .remember:
+            guard let content = action.memoryContent else { throw AIService.AIError.requestFailed("没有可保存的记忆内容。") }
+            addMemory(category: action.memoryCategory ?? "其他", content: content)
+        case .forgetMemory:
+            guard let keyword = action.memoryKeyword, deleteMemories(matching: keyword) > 0 else {
+                throw AIService.AIError.requestFailed("没有找到匹配的长期记忆。")
+            }
         }
     }
     private static func load<T: Decodable>(_ type: T.Type, key: String) -> T? {
@@ -947,21 +1268,30 @@ enum AIService {    private struct GeneratedPlanResponse: Decodable {
     static func coachReplyStream(
         question: String,
         context: String,
+        imageData: Data?,
         configuration: AIConfiguration,
         apiKey: String,
         onDelta: @escaping @MainActor (String) -> Void
     ) async throws {
         let actionProtocol = """
-        你能读取用户资料、今天的饮食与营养、打卡、当前训练计划和最近训练记录。若用户明确报告完成了饮食、训练、体重、睡眠/饮水/步数，或明确要求调整目标/重新生成周计划，请在正常中文回复的最后另起一行输出唯一的机器指令：
+        你能读取用户资料、长期记忆、最近对话、饮食与营养、体重趋势、打卡、完整周计划和近 4 周训练完成率。若用户明确报告了新记录，或明确要求修改 App 数据，请在正常中文回复的最后另起一行输出唯一的机器指令：
         <gymcoach_actions>[{...}]</gymcoach_actions>
-        指令必须是严格 JSON 数组，且只能使用这些 type：
-        record_meal（mealType: breakfast/lunch/dinner/snack、description、calories、protein、carbs、fat）；
-        record_workout（workoutTitle、workoutMinutes、cardioMinutes、cardioInclinePercent、cardioSpeedKilometersPerHour、effort、exercises、description）；
-        record_weight（weightKilograms、waistCentimeters）；
-        record_checkin（waterGlasses、sleepHours、steps）；
-        update_profile（fitnessGoal: 减脂/维持/增肌、goalWeightKilograms、trainingDaysPerWeek）；
-        regenerate_weekly_plan（不需其他字段）。
-        只有把握用户是在“陈述事实”或“明确要求修改”时才输出指令；估算数值时要说明是估算。不要为普通提问、建议、医疗或药物相关对话输出指令。绝不声称已保存——用户会在 App 里确认后保存。
+        可调用功能：
+        \(CoachCapability.promptRegistry)
+
+        参数规则：
+        - record_meal/delete_meal：mealType 使用 breakfast/lunch/dinner/snack；记录还需 description、calories、protein、carbs、fat。
+        - record_workout：workoutTitle、workoutMinutes、cardioMinutes、cardioInclinePercent、cardioSpeedKilometersPerHour、effort、exercises、description。
+        - record_weight：weightKilograms，可选 waistCentimeters。record_checkin：waterGlasses、sleepHours、steps。
+        - update_profile：fitnessGoal 仅为减脂/维持/增肌，可选 goalWeightKilograms、trainingDaysPerWeek、preferredSessionMinutes。
+        - update_nutrition_targets：自动计算用 useRecommendedNutrition=true；手动目标用 false 并同时提供 dailyCaloriesGoal、dailyProteinGoal。
+        - update_day_plan：提供 weekday 1...7 和完整 dayPlan，dayPlan 格式为 {"id":"adjusted","weekday":2,"title":"标题","subtitle":"调整原因","exercises":[{"name":"动作","target":"组数 × 次数","cue":"提示"}],"cardio":"有氧或 null"}。
+        - replace_weekly_plan：提供 weeklyPlans，必须恰好有 weekday 1...7 七项，单项格式同 dayPlan；如改变训练频率，同时提供 trainingDaysPerWeek。要遵守用户可训练日期；恢复日 exercises=[]。reset_weekly_plan 无参数。
+        - add_reminder：reminderTitle、reminderBody、reminderHour、reminderMinute。update_reminder 用 reminderTitle 定位并提供要改的内容/时间。delete_reminder：reminderTitle。
+        - remember：memoryCategory（训练偏好/饮食偏好/时间安排/身体限制/其他）和 memoryContent。forget_memory：memoryKeyword。
+
+        当用户说“记住……”或透露稳定且未来有用的偏好、时间安排、器械限制或身体限制时，可以提出 remember；临时状态不要长期记忆。当用户要求根据执行情况调整计划时，必须先引用近 4 周完成率和近期趋势，再输出 update_day_plan 或 replace_weekly_plan，不能只给口头建议。不要因为一次漏练就补偿性加量；完成率持续偏低时优先减少动作/天数或缩短时长，持续完成且恢复良好时才小幅进阶。
+        只有把握用户是在“陈述事实”或“明确要求修改”时才输出指令；所有写入、删除和改计划都由用户在 App 内确认。估算数值时说明是估算。普通问答、医疗和药物相关对话不要输出指令。绝不声称已经保存。
         """
         let prompt = """
         你是用户的中文健身教练。给出务实、简短、可执行的减脂与训练建议；不提供药物剂量、疾病诊断或替代医生意见。
@@ -970,7 +1300,7 @@ enum AIService {    private struct GeneratedPlanResponse: Decodable {
         """
         let custom = configuration.customInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
         let system = "用中文回答，先给结论，再给不超过 3 条行动建议。\n\n\(actionProtocol)\(custom.isEmpty ? "" : "\n\n用户额外偏好：\(custom)")"
-        try await stream(prompt: prompt, configuration: configuration, apiKey: apiKey, systemPrompt: system, onDelta: onDelta)
+        try await stream(prompt: prompt, imageData: configuration.useImageAnalysis ? imageData : nil, configuration: configuration, apiKey: apiKey, systemPrompt: system, onDelta: onDelta)
     }
 
     static func testConnection(configuration: AIConfiguration, apiKey: String) async throws {
@@ -983,13 +1313,15 @@ enum AIService {    private struct GeneratedPlanResponse: Decodable {
         )
     }
 
-    static func generateWeeklyPlan(profile: FitnessProfile, currentWeight: Double, configuration: AIConfiguration, apiKey: String) async throws -> [WorkoutPlan] {
+    static func generateWeeklyPlan(profile: FitnessProfile, currentWeight: Double, adaptationContext: String, configuration: AIConfiguration, apiKey: String) async throws -> [WorkoutPlan] {
         let prompt = """
         你是谨慎的中文私教。基于以下个人资料生成 7 天训练安排：
          年龄：\(profile.age)，性别：\(profile.sex.rawValue)，身高：\(Int(profile.heightCentimeters))cm，体重：\(String(format: "%.1f", currentWeight))kg，目标：\(profile.fitnessGoal.rawValue)，每周训练：\(profile.trainingDaysPerWeek) 天，每次：\(profile.preferredSessionMinutes) 分钟，经验：\(profile.trainingExperience.rawValue)，器械：\(profile.equipmentAccess.rawValue)，体态关注：\(profile.posturePriority ? "前倾/圆肩" : "无")。
+        长期记忆、当前计划与执行情况：
+        \(adaptationContext)
         输出严格 JSON，不要 Markdown，不要解释。格式必须是：
         {"weeklyPlans":[{"id":"day-1","weekday":1,"title":"中文标题","subtitle":"一句重点","exercises":[{"name":"动作名","target":"组数 × 次数","cue":"简短动作提示"}],"cardio":"可选有氧或 null"}]}
-        必须恰好包含 weekday 1 到 7 各一天。非训练日 exercises 为空数组。用户当前每周训练 \(profile.trainingDaysPerWeek) 天；当为 5 天时，必须把周一至周五（weekday 2–6）排为训练日，周六、周日（weekday 7、1）均为恢复日，不能把两个休息日拆开。对新手避免高风险动作；体态关注为真时安排上背、后肩和活动度练习。不要给药物剂量、疾病诊断或疼痛治疗建议。
+        必须恰好包含 weekday 1 到 7 各一天。非训练日 exercises 为空数组。用户当前每周训练 \(profile.trainingDaysPerWeek) 天；当为 5 天时，必须把周一至周五（weekday 2–6）排为训练日，周六、周日（weekday 7、1）均为恢复日，不能把两个休息日拆开。参考近 4 周完成率：持续低于 70% 时减少单日动作或时长，不做补偿性加量；持续高于 85% 且恢复良好时才小幅进阶。必须遵守长期记忆里的可训练日期、器械和身体限制。对新手避免高风险动作；体态关注为真时安排上背、后肩和活动度练习。不要给药物剂量、疾病诊断或疼痛治疗建议。
         """
         let response = try await send(
             prompt: prompt,
@@ -1011,6 +1343,7 @@ enum AIService {    private struct GeneratedPlanResponse: Decodable {
     }
     private static func stream(
         prompt: String,
+        imageData: Data?,
         configuration: AIConfiguration,
         apiKey: String,
         systemPrompt: String,
@@ -1021,13 +1354,24 @@ enum AIService {    private struct GeneratedPlanResponse: Decodable {
             throw AIError.invalidEndpoint
         }
 
+        let userContent: Any
+        if let imageData {
+            let dataURL = "data:image/jpeg;base64,\(imageData.base64EncodedString())"
+            userContent = [
+                ["type": "text", "text": prompt],
+                ["type": "image_url", "image_url": ["url": dataURL]]
+            ]
+        } else {
+            userContent = prompt
+        }
+
         let payload: [String: Any] = [
             "model": configuration.model,
             "temperature": 0.2,
             "stream": true,
             "messages": [
                 ["role": "system", "content": systemPrompt],
-                ["role": "user", "content": prompt]
+                ["role": "user", "content": userContent]
             ]
         ]
         var request = URLRequest(url: url)
@@ -2444,6 +2788,8 @@ struct CoachChatView: View {
     @State private var errorText: String?
     @State private var pendingActions: [CoachAction] = []
     @State private var applyingActionID: UUID?
+    @State private var photoItem: PhotosPickerItem?
+    @State private var photoData: Data?
     @FocusState private var questionIsFocused: Bool
 
     var body: some View {
@@ -2455,9 +2801,29 @@ struct CoachChatView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 12) {
                             if store.chatMessages.isEmpty {
-                                Text("可以问：今晚吃什么更适合减脂？今天练了什么？也可以直接说“午饭吃了…”，“刚练了…”，“体重 87kg”，AI 会准备记录供你确认。")
-                                    .font(.subheadline).foregroundStyle(.secondary)
-                                    .padding(.top)
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Label("能记住，也能执行", systemImage: "brain.head.profile")
+                                        .font(.headline)
+                                    Text("AI 会读取长期记忆、最近对话和近 4 周完成情况。所有修改都会先给你确认。")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                    HStack {
+                                        Label("\(store.coachMemories.count) 条记忆", systemImage: "brain")
+                                        Label("\(CoachCapability.all.count) 项能力", systemImage: "square.grid.2x2")
+                                    }
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.green)
+                                    Button {
+                                        Task { await sendPreset("复盘我近 4 周的训练完成情况、饮食和体重趋势，并根据我的长期记忆调整整周每天的训练计划。") }
+                                    } label: {
+                                        Label("复盘并调整整周计划", systemImage: "wand.and.stars")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(.green)
+                                }
+                                .padding(16)
+                                .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                             }
                             ForEach(store.chatMessages) { message in
                                 HStack {
@@ -2506,7 +2872,40 @@ struct CoachChatView: View {
                 }
             }
             if let errorText { Text(errorText).font(.caption).foregroundStyle(.red).padding(.horizontal) }
+            if let photoData, let image = UIImage(data: photoData) {
+                HStack(spacing: 10) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 54, height: 54)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    Text("已附加图片，需要当前模型支持视觉")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button { self.photoData = nil; photoItem = nil } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 44, height: 44)
+                    .accessibilityLabel("移除已选图片")
+                }
+                .padding(.horizontal)
+            }
             HStack(alignment: .bottom, spacing: 8) {
+                PhotosPicker(selection: $photoItem, matching: .images) {
+                    Image(systemName: "photo.circle.fill")
+                        .font(.title2)
+                }
+                .frame(width: 44, height: 44)
+                .accessibilityLabel("添加图片")
+                .disabled(isSending || !store.aiConfiguration.useImageAnalysis)
+                .onChange(of: photoItem) { _, item in
+                    Task {
+                        guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
+                        photoData = ImageCompressor.compress(data)
+                    }
+                }
                 TextField("问问你的减脂计划…", text: $question, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...4)
@@ -2518,29 +2917,53 @@ struct CoachChatView: View {
                 } label: {
                     Image(systemName: "arrow.up.circle.fill").font(.title2)
                 }
-                .disabled(question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending || !store.canUseAI)
+                .frame(width: 44, height: 44)
+                .accessibilityLabel("发送给 AI 教练")
+                .disabled((question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && photoData == nil) || isSending || !store.canUseAI)
             }
             .padding()
         }
         .navigationTitle("AI 教练")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                NavigationLink { AISettingsView() } label: {
-                    Image(systemName: "slider.horizontal.3")
+                NavigationLink { CoachMemoryView() } label: {
+                    Image(systemName: "brain.head.profile")
                 }
-                Button("清空", role: .destructive) { store.clearChat(); pendingActions = [] }
-                    .disabled(store.chatMessages.isEmpty)
+                .accessibilityLabel("AI 长期记忆")
+                NavigationLink { CoachCapabilitiesView() } label: {
+                    Image(systemName: "square.grid.2x2")
+                }
+                .accessibilityLabel("AI 可用功能")
+                Menu {
+                    Button {
+                        Task { await sendPreset("复盘我近 4 周的训练完成情况、饮食和体重趋势，并根据我的长期记忆调整整周每天的训练计划。") }
+                    } label: {
+                        Label("复盘并调整周计划", systemImage: "wand.and.stars")
+                    }
+                    .disabled(isSending || !store.canUseAI)
+                    NavigationLink { AISettingsView() } label: {
+                        Label("AI 接口设置", systemImage: "slider.horizontal.3")
+                    }
+                    Button("清空对话", role: .destructive) { store.clearChat(); pendingActions = [] }
+                        .disabled(store.chatMessages.isEmpty)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
             }
         }
     }
 
     @MainActor
     private func send() async {
-        let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let key = store.aiKey else { return }
-        store.appendChat(isUser: true, content: trimmed)
+        let typed = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        let attachedImage = photoData
+        guard !typed.isEmpty || attachedImage != nil, let key = store.aiKey else { return }
+        let trimmed = typed.isEmpty ? "请识别这张图片；如果是餐食，请估算营养并准备饮食记录供我确认。" : typed
+        store.appendChat(isUser: true, content: attachedImage == nil ? trimmed : "📷 \(trimmed)")
         pendingActions = []
         question = ""
+        photoData = nil
+        photoItem = nil
         questionIsFocused = false
         streamingReply = ""
         isSending = true
@@ -2549,6 +2972,7 @@ struct CoachChatView: View {
             try await AIService.coachReplyStream(
                 question: trimmed,
                 context: store.coachContext,
+                imageData: attachedImage,
                 configuration: store.aiConfiguration,
                 apiKey: key
             ) { delta in
@@ -2567,6 +2991,14 @@ struct CoachChatView: View {
     }
 
     @MainActor
+    private func sendPreset(_ text: String) async {
+        guard !isSending else { return }
+        question = text
+        await Task.yield()
+        await send()
+    }
+
+    @MainActor
     private func apply(_ action: CoachAction) async {
         guard applyingActionID == nil else { return }
         applyingActionID = action.id
@@ -2579,6 +3011,100 @@ struct CoachChatView: View {
             errorText = error.localizedDescription
         }
         applyingActionID = nil
+    }
+}
+
+struct CoachMemoryView: View {
+    @EnvironmentObject private var store: FitnessStore
+    @State private var category = "训练偏好"
+    @State private var content = ""
+    private let categories = ["训练偏好", "饮食偏好", "时间安排", "身体限制", "其他"]
+
+    var body: some View {
+        List {
+            Section {
+                Text("这些内容只保存在本机，并会在每次 AI 对话时作为长期背景发送给你配置的模型。你可以随时添加或删除。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Section("新增记忆") {
+                Picker("分类", selection: $category) {
+                    ForEach(categories, id: \.self) { Text($0).tag($0) }
+                }
+                TextField("例如：周六日只能休息，工作日下班训练", text: $content, axis: .vertical)
+                    .lineLimit(2...4)
+                Button {
+                    store.addMemory(category: category, content: content)
+                    content = ""
+                } label: {
+                    Label("保存到长期记忆", systemImage: "plus.circle.fill")
+                }
+                .disabled(content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            Section("已记住 · \(store.coachMemories.count)") {
+                if store.coachMemories.isEmpty {
+                    ContentUnavailableView("还没有长期记忆", systemImage: "brain", description: Text("你也可以在聊天中说“记住我周六日休息”。"))
+                } else {
+                    ForEach(store.coachMemories) { memory in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(memory.category)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.green)
+                            Text(memory.content)
+                                .font(.subheadline)
+                            Text(memory.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 4)
+                        .swipeActions {
+                            Button("删除", role: .destructive) { store.deleteMemory(memory) }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("AI 长期记忆")
+    }
+}
+
+struct CoachCapabilitiesView: View {
+    private var categories: [String] {
+        Array(Set(CoachCapability.all.map(\.category))).sorted { lhs, rhs in
+            let order = ["读取与分析", "记录", "目标与计划", "提醒", "记忆"]
+            return (order.firstIndex(of: lhs) ?? 99) < (order.firstIndex(of: rhs) ?? 99)
+        }
+    }
+
+    var body: some View {
+        List {
+            Section {
+                Text("AI 可以读取下列本地数据，并为可写功能生成确认卡片。只有你点“确认保存”后才会真正修改。HealthKit 自动步数仍受签名权限限制。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(categories, id: \.self) { category in
+                Section(category) {
+                    ForEach(CoachCapability.all.filter { $0.category == category }) { capability in
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: capability.actionName == nil ? "eye.fill" : "checkmark.circle.fill")
+                                .foregroundStyle(capability.actionName == nil ? .blue : .green)
+                                .frame(width: 22)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(capability.title)
+                                    .font(.subheadline.weight(.semibold))
+                                Text(capability.detail)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+            }
+        }
+        .navigationTitle("AI 可用功能")
     }
 }
 
@@ -2596,10 +3122,19 @@ struct CoachActionCard: View {
             Text(action.detail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if !action.planPreviewLines.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(action.planPreviewLines, id: \.self) { line in
+                        Text(line)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
             HStack {
-                Button(isApplying ? "正在保存…" : "确认保存", action: confirm)
+                Button(isApplying ? "正在处理…" : (action.isDestructive ? "确认删除" : "确认保存"), action: confirm)
                     .buttonStyle(.borderedProminent)
-                    .tint(.green)
+                    .tint(action.isDestructive ? .red : .green)
                     .disabled(isApplying)
                 Button("不保存", role: .cancel, action: discard)
                     .buttonStyle(.bordered)
