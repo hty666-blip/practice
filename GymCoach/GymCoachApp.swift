@@ -475,7 +475,7 @@ struct CoachCapability: Identifiable {
     }
 }
 
-enum CoachActionType: String, Decodable {
+enum CoachActionType: String, Decodable, Equatable {
     case recordMeal = "record_meal"
     case deleteMeal = "delete_meal"
     case recordWorkout = "record_workout"
@@ -534,6 +534,11 @@ struct CoachAction: Decodable, Identifiable {
     var memoryCategory: String?
     var memoryContent: String?
     var memoryKeyword: String?
+
+    init(type: CoachActionType, weeklyPlans: [WorkoutPlan]? = nil) {
+        self.type = type
+        self.weeklyPlans = weeklyPlans
+    }
 
     private enum CodingKeys: String, CodingKey {
         case type, mealType, description, calories, protein, carbs, fat
@@ -844,15 +849,21 @@ final class FitnessStore: ObservableObject {
         save(aiWorkoutPlans, key: Keys.aiWorkoutPlans)
     }
 
-    func generateAIWorkoutPlan() async throws {
+    func buildAIWorkoutPlan(adjustmentRequest: String? = nil) async throws -> [WorkoutPlan] {
         guard let apiKey = aiKey else { throw AIService.AIError.requestFailed("请先在设置中保存 AI API Key。") }
-        let plans = try await AIService.generateWeeklyPlan(
+        let request = adjustmentRequest?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let context = request.isEmpty ? coachContext : "\(coachContext)\n用户本次调整要求：\(request)"
+        return try await AIService.generateWeeklyPlan(
             profile: profile,
             currentWeight: currentWeight ?? profile.startingWeight,
-            adaptationContext: coachContext,
+            adaptationContext: context,
             configuration: aiConfiguration,
             apiKey: apiKey
         )
+    }
+
+    func generateAIWorkoutPlan() async throws {
+        let plans = try await buildAIWorkoutPlan()
         saveAIWorkoutPlans(plans)
     }
 
@@ -2869,6 +2880,9 @@ struct CoachChatView: View {
                     .onChange(of: streamingReply) { _, _ in
                         if isSending { proxy.scrollTo("streaming-reply", anchor: .bottom) }
                     }
+                    .onChange(of: pendingActions.count) { _, _ in
+                        if let id = pendingActions.first?.id { proxy.scrollTo(id, anchor: .bottom) }
+                    }
                 }
             }
             if let errorText { Text(errorText).font(.caption).foregroundStyle(.red).padding(.horizontal) }
@@ -2968,6 +2982,10 @@ struct CoachChatView: View {
         streamingReply = ""
         isSending = true
         errorText = nil
+        if attachedImage == nil && isWeeklyPlanAdjustmentRequest(trimmed) {
+            await prepareWeeklyPlanAdjustment(request: trimmed)
+            return
+        }
         do {
             try await AIService.coachReplyStream(
                 question: trimmed,
@@ -2993,9 +3011,40 @@ struct CoachChatView: View {
     @MainActor
     private func sendPreset(_ text: String) async {
         guard !isSending else { return }
-        question = text
-        await Task.yield()
-        await send()
+        question = ""
+        photoData = nil
+        photoItem = nil
+        questionIsFocused = false
+        pendingActions = []
+        streamingReply = ""
+        errorText = nil
+        isSending = true
+        store.appendChat(isUser: true, content: text)
+        await prepareWeeklyPlanAdjustment(request: text)
+    }
+
+    private func isWeeklyPlanAdjustmentRequest(_ text: String) -> Bool {
+        let normalized = text.replacingOccurrences(of: " ", with: "")
+        let planKeywords = ["训练计划", "周计划", "整周", "本周", "下周", "七天计划", "7天计划"]
+        let weekdayKeywords = ["周一", "周二", "周三", "周四", "周五", "周六", "周日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+        let changeKeywords = ["调整", "修改", "更改", "改成", "重排", "排一下", "重新安排", "优化", "生成", "制定", "换一套", "换成", "增加", "减少", "取消", "重新做"]
+        let refersToPlan = planKeywords.contains(where: normalized.contains)
+        let refersToSpecificTrainingDay = weekdayKeywords.contains(where: normalized.contains) && (normalized.contains("训练") || normalized.contains("练"))
+        return changeKeywords.contains(where: normalized.contains) && (refersToPlan || refersToSpecificTrainingDay)
+    }
+
+    @MainActor
+    private func prepareWeeklyPlanAdjustment(request: String) async {
+        do {
+            let plans = try await store.buildAIWorkoutPlan(adjustmentRequest: request)
+            pendingActions = [CoachAction(type: .replaceWeeklyPlan, weeklyPlans: plans)]
+            store.appendChat(isUser: false, content: "我已根据你的个人资料、长期记忆和近 4 周完成情况生成新的整周计划。请先查看下面的 7 天预览，点击“确认执行”后才会替换当前计划。")
+        } catch {
+            errorText = error.localizedDescription
+            store.appendChat(isUser: false, content: "这次没有成功生成可保存的完整计划：\(error.localizedDescription)")
+        }
+        streamingReply = ""
+        isSending = false
     }
 
     @MainActor
@@ -3132,7 +3181,7 @@ struct CoachActionCard: View {
                 }
             }
             HStack {
-                Button(isApplying ? "正在处理…" : (action.isDestructive ? "确认删除" : "确认保存"), action: confirm)
+                Button(isApplying ? "正在处理…" : (action.type == .replaceWeeklyPlan ? "确认替换计划" : (action.isDestructive ? "确认删除" : "确认保存")), action: confirm)
                     .buttonStyle(.borderedProminent)
                     .tint(action.isDestructive ? .red : .green)
                     .disabled(isApplying)
