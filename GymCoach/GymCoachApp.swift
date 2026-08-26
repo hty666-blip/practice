@@ -852,7 +852,7 @@ final class FitnessStore: ObservableObject {
     func buildAIWorkoutPlan(adjustmentRequest: String? = nil) async throws -> [WorkoutPlan] {
         guard let apiKey = aiKey else { throw AIService.AIError.requestFailed("请先在设置中保存 AI API Key。") }
         let request = adjustmentRequest?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let context = request.isEmpty ? coachContext : "\(coachContext)\n用户本次调整要求：\(request)"
+        let context = request.isEmpty ? workoutPlanContext : "\(workoutPlanContext)\n用户本次调整要求（必须体现在新计划中）：\(request)"
         return try await AIService.generateWeeklyPlan(
             profile: profile,
             currentWeight: currentWeight ?? profile.startingWeight,
@@ -936,6 +936,9 @@ final class FitnessStore: ObservableObject {
     }
 
     private var trainingAdherenceContext: String {
+        guard !sessions.isEmpty else {
+            return "暂无训练日志，属于数据不足，不能据此判断完成率低；请按个人资料和用户明确要求正常制定计划。"
+        }
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         let dayNames = ["日", "一", "二", "三", "四", "五", "六"]
@@ -1004,6 +1007,17 @@ final class FitnessStore: ObservableObject {
         近期趋势：\(recentTrendContext)
         最近对话：
         \(recentConversationContext)
+        """
+    }
+
+    private var workoutPlanContext: String {
+        """
+        长期记忆：\(memoryContext)
+        当前整周计划：
+        \(planContext)
+        近 4 周训练执行：
+        \(trainingAdherenceContext)
+        近期趋势：\(recentTrendContext)
         """
     }
 
@@ -1332,7 +1346,7 @@ enum AIService {    private struct GeneratedPlanResponse: Decodable {
         \(adaptationContext)
         输出严格 JSON，不要 Markdown，不要解释。格式必须是：
         {"weeklyPlans":[{"id":"day-1","weekday":1,"title":"中文标题","subtitle":"一句重点","exercises":[{"name":"动作名","target":"组数 × 次数","cue":"简短动作提示"}],"cardio":"可选有氧或 null"}]}
-        必须恰好包含 weekday 1 到 7 各一天。非训练日 exercises 为空数组。用户当前每周训练 \(profile.trainingDaysPerWeek) 天；当为 5 天时，必须把周一至周五（weekday 2–6）排为训练日，周六、周日（weekday 7、1）均为恢复日，不能把两个休息日拆开。参考近 4 周完成率：持续低于 70% 时减少单日动作或时长，不做补偿性加量；持续高于 85% 且恢复良好时才小幅进阶。必须遵守长期记忆里的可训练日期、器械和身体限制。对新手避免高风险动作；体态关注为真时安排上背、后肩和活动度练习。不要给药物剂量、疾病诊断或疼痛治疗建议。
+        必须恰好包含 weekday 1 到 7 各一天。非训练日 exercises 为空数组。用户当前每周训练 \(profile.trainingDaysPerWeek) 天；当为 5 天时，必须把周一至周五（weekday 2–6）排为训练日，周六、周日（weekday 7、1）均为恢复日，不能把两个休息日拆开。用户本次明确提出的调整必须落实到结果中；除非要求明显危险或违反身体限制，不得只评价、劝退或拒绝生成。训练日志为空代表数据不足，不代表完成率低。确有低完成率时可控制每个动作的组数和总时长，但仍须给出完整可执行计划。必须遵守长期记忆里的可训练日期、器械和身体限制。对新手避免高风险动作；体态关注为真时安排上背、后肩和活动度练习。不要给药物剂量、疾病诊断或疼痛治疗建议。
         """
         let response = try await send(
             prompt: prompt,
@@ -1461,7 +1475,7 @@ enum AIService {    private struct GeneratedPlanResponse: Decodable {
         ]
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 45
+        request.timeoutInterval = 120
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
@@ -2885,57 +2899,9 @@ struct CoachChatView: View {
                     }
                 }
             }
-            if let errorText { Text(errorText).font(.caption).foregroundStyle(.red).padding(.horizontal) }
-            if let photoData, let image = UIImage(data: photoData) {
-                HStack(spacing: 10) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 54, height: 54)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    Text("已附加图片，需要当前模型支持视觉")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button { self.photoData = nil; photoItem = nil } label: {
-                        Image(systemName: "xmark.circle.fill")
-                    }
-                    .buttonStyle(.plain)
-                    .frame(width: 44, height: 44)
-                    .accessibilityLabel("移除已选图片")
-                }
-                .padding(.horizontal)
-            }
-            HStack(alignment: .bottom, spacing: 8) {
-                PhotosPicker(selection: $photoItem, matching: .images) {
-                    Image(systemName: "photo.circle.fill")
-                        .font(.title2)
-                }
-                .frame(width: 44, height: 44)
-                .accessibilityLabel("添加图片")
-                .disabled(isSending || !store.aiConfiguration.useImageAnalysis)
-                .onChange(of: photoItem) { _, item in
-                    Task {
-                        guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
-                        photoData = ImageCompressor.compress(data)
-                    }
-                }
-                TextField("问问你的减脂计划…", text: $question, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1...4)
-                    .focused($questionIsFocused)
-                    .submitLabel(.send)
-                    .onSubmit { Task { await send() } }
-                Button {
-                    Task { await send() }
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill").font(.title2)
-                }
-                .frame(width: 44, height: 44)
-                .accessibilityLabel("发送给 AI 教练")
-                .disabled((question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && photoData == nil) || isSending || !store.canUseAI)
-            }
-            .padding()
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if store.canUseAI { composer }
         }
         .navigationTitle("AI 教练")
         .toolbar {
@@ -3025,12 +2991,19 @@ struct CoachChatView: View {
 
     private func isWeeklyPlanAdjustmentRequest(_ text: String) -> Bool {
         let normalized = text.replacingOccurrences(of: " ", with: "")
-        let planKeywords = ["训练计划", "周计划", "整周", "本周", "下周", "七天计划", "7天计划"]
+        let planKeywords = ["训练计划", "周计划", "计划里", "整周", "本周", "下周", "七天计划", "7天计划", "休息日"]
         let weekdayKeywords = ["周一", "周二", "周三", "周四", "周五", "周六", "周日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
-        let changeKeywords = ["调整", "修改", "更改", "改成", "重排", "排一下", "重新安排", "优化", "生成", "制定", "换一套", "换成", "增加", "减少", "取消", "重新做"]
+        let changeKeywords = ["调整", "修改", "更改", "改成", "重排", "排一下", "重新安排", "安排", "优化", "生成", "制定", "换一套", "换成", "替换", "增加", "添加", "加上", "加个", "加", "减少", "删除", "删掉", "删", "去掉", "取消", "重新做"]
         let refersToPlan = planKeywords.contains(where: normalized.contains)
-        let refersToSpecificTrainingDay = weekdayKeywords.contains(where: normalized.contains) && (normalized.contains("训练") || normalized.contains("练"))
-        return changeKeywords.contains(where: normalized.contains) && (refersToPlan || refersToSpecificTrainingDay)
+        let refersToSpecificTrainingDay = weekdayKeywords.contains(where: normalized.contains) && (normalized.contains("训练") || normalized.contains("练") || normalized.contains("动作") || normalized.contains("有氧"))
+        let hasChangeRequest = changeKeywords.contains(where: normalized.contains)
+        if hasChangeRequest && (refersToPlan || refersToSpecificTrainingDay) { return true }
+
+        let followUpKeywords = ["就加", "加上吧", "加进去", "按这个", "照这个", "改吧", "调整吧", "换吧", "重新做吧"]
+        let recentPlanDiscussion = store.chatMessages.suffix(6).contains { message in
+            planKeywords.contains(where: message.content.contains) || weekdayKeywords.contains(where: message.content.contains)
+        }
+        return recentPlanDiscussion && followUpKeywords.contains(where: normalized.contains)
     }
 
     @MainActor
@@ -3045,6 +3018,76 @@ struct CoachChatView: View {
         }
         streamingReply = ""
         isSending = false
+    }
+
+    private var composer: some View {
+        VStack(spacing: 8) {
+            if let errorText {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                    Text(errorText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                .font(.caption)
+                .foregroundStyle(.red)
+                .padding(.horizontal, 16)
+            }
+            if let photoData, let image = UIImage(data: photoData) {
+                HStack(spacing: 10) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 48, height: 48)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    Text("已附加图片，需要当前模型支持视觉")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button { self.photoData = nil; photoItem = nil } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 44, height: 44)
+                    .accessibilityLabel("移除已选图片")
+                }
+                .padding(.horizontal, 16)
+            }
+            HStack(alignment: .bottom, spacing: 8) {
+                PhotosPicker(selection: $photoItem, matching: .images) {
+                    Image(systemName: "photo.circle.fill")
+                        .font(.title2)
+                }
+                .frame(width: 44, height: 44)
+                .accessibilityLabel("添加图片")
+                .disabled(isSending || !store.aiConfiguration.useImageAnalysis)
+                .onChange(of: photoItem) { _, item in
+                    Task {
+                        guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
+                        photoData = ImageCompressor.compress(data)
+                    }
+                }
+                TextField("输入消息…", text: $question, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1...4)
+                    .focused($questionIsFocused)
+                    .submitLabel(.send)
+                    .onSubmit { Task { await send() } }
+                Button {
+                    Task { await send() }
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill").font(.title2)
+                }
+                .frame(width: 44, height: 44)
+                .accessibilityLabel("发送给 AI 教练")
+                .disabled((question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && photoData == nil) || isSending || !store.canUseAI)
+            }
+            .padding(.horizontal, 12)
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
     }
 
     @MainActor
