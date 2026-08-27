@@ -611,6 +611,15 @@ struct CoachAction: Decodable, Identifiable {
         }
     }
 
+    var canAutoExecuteFromExplicitRequest: Bool {
+        switch type {
+        case .recordMeal, .recordWorkout, .recordWeight, .recordCheckIn, .remember:
+            return true
+        default:
+            return false
+        }
+    }
+
     var planPreviewLines: [String] {
         let plans: [WorkoutPlan]
         if let weeklyPlans { plans = weeklyPlans.sorted { $0.weekday < $1.weekday } }
@@ -654,6 +663,31 @@ struct ParsedCoachReply {
     static func visibleText(in raw: String) -> String {
         guard let start = raw.range(of: "<gymcoach_actions>") else { return raw }
         return String(raw[..<start.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+enum CoachTurnRoute: String, Decodable, Equatable {
+    case chat
+    case actions
+    case weeklyPlan = "weekly_plan"
+}
+
+struct CoachTurnDecision: Decodable {
+    let route: CoachTurnRoute
+    let actions: [CoachAction]
+
+    private enum CodingKeys: String, CodingKey {
+        case route, actions
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        route = try container.decode(CoachTurnRoute.self, forKey: .route)
+        if route == .actions {
+            actions = (try? container.decode([CoachAction].self, forKey: .actions)) ?? []
+        } else {
+            actions = []
+        }
     }
 }
 
@@ -826,6 +860,16 @@ final class FitnessStore: ObservableObject {
         save(sessions, key: Keys.sessions)
     }
 
+    func saveSession(_ session: WorkoutSession) {
+        if let index = sessions.firstIndex(where: { $0.id == session.id }) {
+            sessions[index] = session
+        } else {
+            sessions.append(session)
+        }
+        sessions.sort { $0.date > $1.date }
+        save(sessions, key: Keys.sessions)
+    }
+
     func deleteLatestSession() {
         guard !sessions.isEmpty else { return }
         sessions.removeFirst()
@@ -858,7 +902,8 @@ final class FitnessStore: ObservableObject {
             currentWeight: currentWeight ?? profile.startingWeight,
             adaptationContext: context,
             configuration: aiConfiguration,
-            apiKey: apiKey
+            apiKey: apiKey,
+            adjustmentRequest: request.isEmpty ? nil : request
         )
     }
 
@@ -1267,7 +1312,8 @@ enum FoodEstimator {
 
 // MARK: - AI service
 
-enum AIService {    private struct GeneratedPlanResponse: Decodable {
+enum AIService {
+    private struct GeneratedPlanResponse: Decodable {
         let weeklyPlans: [WorkoutPlan]
     }
 
@@ -1283,11 +1329,57 @@ enum AIService {    private struct GeneratedPlanResponse: Decodable {
             imageData: configuration.useImageAnalysis ? imageData : nil,
             configuration: configuration,
             apiKey: apiKey,
-            systemPrompt: "只输出符合要求的 JSON。不要提供药物剂量、诊断或医疗建议。"
+            systemPrompt: "只输出符合要求的 JSON。不要提供药物剂量、诊断或医疗建议。",
+            maxTokens: 1800,
+            jsonMode: true
         )
         let json = extractJSON(from: response)
         guard let data = json.data(using: .utf8) else { throw AIError.unreadableResponse }
         return try JSONDecoder().decode(NutritionEstimate.self, from: data)
+    }
+
+    static func decideCoachTurn(question: String, context: String, configuration: AIConfiguration, apiKey: String) async throws -> CoachTurnDecision {
+        let prompt = """
+        你是“练了么”App 的动作规划器。请根据语义判断用户是在普通咨询，还是要求读取后修改 App 数据。不要依赖固定关键词；结合最近对话理解“就这样改”“都记上”等省略表达。
+        只返回 JSON，不要 Markdown、解释或额外文字：
+        {"route":"chat或actions或weekly_plan","actions":[]}
+
+        路由规则：
+        - 普通问答、建议、解释、动作教学：route=chat，actions=[]。
+        - 任何新建、修改或删除饮食/训练记录/体重/打卡/个人目标/营养目标/提醒/长期记忆：route=actions，并输出一个或多个完整 action。
+        - 任何生成、添加、删除或调整某天/整周训练计划的要求：route=weekly_plan，actions=[]。不要仅因为完成率低而拒绝。
+        - 用户一次说了早餐、午餐和晚餐时，分别输出 3 个 record_meal；营养按常见份量估算。用户明确说已经吃过或要求补记时才记录，询问“吃什么”不记录。
+        - 只有用户明确要求改变数据时才生成 action；不确定时使用 chat。
+
+        可用 action：
+        \(CoachCapability.promptRegistry)
+
+        参数规则：
+        - record_meal/delete_meal：mealType 使用 breakfast/lunch/dinner/snack；记录还需 description、calories、protein、carbs、fat。
+        - record_workout：workoutTitle、workoutMinutes，可带 exercises、cardioMinutes、cardioInclinePercent、cardioSpeedKilometersPerHour、effort、description。
+        - record_weight：weightKilograms，可选 waistCentimeters。record_checkin：waterGlasses、sleepHours、steps。
+        - update_profile：fitnessGoal 仅为减脂/维持/增肌，可带 goalWeightKilograms、trainingDaysPerWeek、preferredSessionMinutes。
+        - update_nutrition_targets：自动计算用 useRecommendedNutrition=true；手动目标需 false、dailyCaloriesGoal、dailyProteinGoal。
+        - add/update/delete_reminder：使用 reminderTitle，可带 reminderBody、reminderHour、reminderMinute。
+        - remember：memoryCategory、memoryContent。forget_memory：memoryKeyword。
+        - 删除、目标、提醒等修改必须生成 action，不要在回复里假装已经完成。
+        当前数据与最近对话：
+        \(context)
+        用户本次消息：\(question)
+        """
+        let response = try await send(
+            prompt: prompt,
+            imageData: nil,
+            configuration: configuration,
+            apiKey: apiKey,
+            systemPrompt: "只返回可由 JSONDecoder 解析的 JSON。",
+            timeoutInterval: 35,
+            maxTokens: 2200,
+            jsonMode: true
+        )
+        let json = extractJSON(from: response)
+        guard let data = json.data(using: .utf8) else { throw AIError.unreadableResponse }
+        return try JSONDecoder().decode(CoachTurnDecision.self, from: data)
     }
 
     static func coachReplyStream(
@@ -1338,22 +1430,26 @@ enum AIService {    private struct GeneratedPlanResponse: Decodable {
         )
     }
 
-    static func generateWeeklyPlan(profile: FitnessProfile, currentWeight: Double, adaptationContext: String, configuration: AIConfiguration, apiKey: String) async throws -> [WorkoutPlan] {
+    static func generateWeeklyPlan(profile: FitnessProfile, currentWeight: Double, adaptationContext: String, configuration: AIConfiguration, apiKey: String, adjustmentRequest: String? = nil) async throws -> [WorkoutPlan] {
+        let priorityRequest = adjustmentRequest?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let prompt = """
         你是谨慎的中文私教。基于以下个人资料生成 7 天训练安排：
          年龄：\(profile.age)，性别：\(profile.sex.rawValue)，身高：\(Int(profile.heightCentimeters))cm，体重：\(String(format: "%.1f", currentWeight))kg，目标：\(profile.fitnessGoal.rawValue)，每周训练：\(profile.trainingDaysPerWeek) 天，每次：\(profile.preferredSessionMinutes) 分钟，经验：\(profile.trainingExperience.rawValue)，器械：\(profile.equipmentAccess.rawValue)，体态关注：\(profile.posturePriority ? "前倾/圆肩" : "无")。
+        \(priorityRequest.isEmpty ? "本次没有额外修改要求。" : "本次最高优先级修改要求：\(priorityRequest)")
         长期记忆、当前计划与执行情况：
         \(adaptationContext)
         输出严格 JSON，不要 Markdown，不要解释。格式必须是：
         {"weeklyPlans":[{"id":"day-1","weekday":1,"title":"中文标题","subtitle":"一句重点","exercises":[{"name":"动作名","target":"组数 × 次数","cue":"简短动作提示"}],"cardio":"可选有氧或 null"}]}
-        必须恰好包含 weekday 1 到 7 各一天。非训练日 exercises 为空数组。用户当前每周训练 \(profile.trainingDaysPerWeek) 天；当为 5 天时，必须把周一至周五（weekday 2–6）排为训练日，周六、周日（weekday 7、1）均为恢复日，不能把两个休息日拆开。用户本次明确提出的调整必须落实到结果中；除非要求明显危险或违反身体限制，不得只评价、劝退或拒绝生成。训练日志为空代表数据不足，不代表完成率低。确有低完成率时可控制每个动作的组数和总时长，但仍须给出完整可执行计划。必须遵守长期记忆里的可训练日期、器械和身体限制。对新手避免高风险动作；体态关注为真时安排上背、后肩和活动度练习。不要给药物剂量、疾病诊断或疼痛治疗建议。
+        weekday 映射固定为：1=周日、2=周一、3=周二、4=周三、5=周四、6=周五、7=周六。必须恰好包含 weekday 1 到 7 各一天，每个训练日 4–6 个动作，提示保持简短。非训练日 exercises 为空数组。用户当前每周训练 \(profile.trainingDaysPerWeek) 天；当为 5 天时，必须把周一至周五（weekday 2–6）排为训练日，周六、周日（weekday 7、1）均为恢复日，不能把两个休息日拆开。用户本次明确提出的调整必须落实到结果中；除非要求明显危险或违反身体限制，不得只评价、劝退或拒绝生成。训练日志为空代表数据不足，不代表完成率低。确有低完成率时可控制每个动作的组数和总时长，但仍须给出完整可执行计划。必须遵守长期记忆里的可训练日期、器械和身体限制。对新手避免高风险动作；体态关注为真时安排上背、后肩和活动度练习。输出前检查本次最高优先级修改是否已经出现在对应日期的 exercises 或 cardio 中。不要给药物剂量、疾病诊断或疼痛治疗建议。
         """
         let response = try await send(
             prompt: prompt,
             imageData: nil,
             configuration: configuration,
             apiKey: apiKey,
-            systemPrompt: "只返回能够被 JSONDecoder 解析的 JSON。"
+            systemPrompt: "只返回能够被 JSONDecoder 解析的 JSON。",
+            maxTokens: 8000,
+            jsonMode: true
         )
         let json = extractJSON(from: response)
         guard let data = json.data(using: .utf8) else { throw AIError.unreadableResponse }
@@ -1448,7 +1544,7 @@ enum AIService {    private struct GeneratedPlanResponse: Decodable {
         }
         guard receivedContent else { throw AIError.unreadableResponse }
     }
-    private static func send(prompt: String, imageData: Data?, configuration: AIConfiguration, apiKey: String, systemPrompt: String) async throws -> String {
+    private static func send(prompt: String, imageData: Data?, configuration: AIConfiguration, apiKey: String, systemPrompt: String, timeoutInterval: TimeInterval = 120, maxTokens: Int? = nil, jsonMode: Bool = false) async throws -> String {
         guard let url = URL(string: configuration.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)),
               url.scheme == "https" || url.scheme == "http" else {
             throw AIError.invalidEndpoint
@@ -1465,7 +1561,7 @@ enum AIService {    private struct GeneratedPlanResponse: Decodable {
             userContent = prompt
         }
 
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "model": configuration.model,
             "temperature": 0.2,
             "messages": [
@@ -1473,9 +1569,13 @@ enum AIService {    private struct GeneratedPlanResponse: Decodable {
                 ["role": "user", "content": userContent]
             ]
         ]
+        if let maxTokens { payload["max_tokens"] = maxTokens }
+        if jsonMode && (configuration.model.lowercased().contains("deepseek") || configuration.endpoint.lowercased().contains("deepseek")) {
+            payload["response_format"] = ["type": "json_object"]
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 120
+        request.timeoutInterval = timeoutInterval
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
@@ -2339,9 +2439,11 @@ struct WorkoutHomeView: View {
     @EnvironmentObject private var store: FitnessStore
 
     private var plan: WorkoutPlan { store.todayPlan }
-    private var completedToday: Bool {
-        store.sessions.contains { Calendar.current.isDateInToday($0.date) }
+    private var todaySession: WorkoutSession? {
+        store.sessions.first { Calendar.current.isDateInToday($0.date) }
     }
+
+    private var completedToday: Bool { todaySession != nil }
 
     private var estimatedSessionCalories: Int {
         let cardioMinutes = plan.cardio == nil ? 0 : min(20, max(10, store.profile.preferredSessionMinutes / 3))
@@ -2354,7 +2456,7 @@ struct WorkoutHomeView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(completedToday ? "今天已完成" : "今天的训练")
+                            Text(completedToday ? "今天已保存" : "今天的训练")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(completedToday ? .green : .secondary)
                             Text(plan.title)
@@ -2377,20 +2479,22 @@ struct WorkoutHomeView: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
 
-                    if completedToday {
-                        Label("这次训练已经记录。恢复、吃够蛋白质和正常活动同样算进计划。", systemImage: "checkmark.circle.fill")
+                    if let session = todaySession {
+                        let doneCount = session.exercises.filter(\.completed).count
+                        Label(session.exercises.isEmpty ? "今天的恢复记录已保存，可以随时修改。" : "已保存 \(doneCount)/\(session.exercises.count) 个动作，可以随时继续修改。", systemImage: "checkmark.circle.fill")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                    } else {
-                        NavigationLink { WorkoutSessionView(plan: plan) } label: {
-                            Label(plan.exercises.isEmpty ? "查看恢复安排" : "开始训练", systemImage: "play.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .tint(.green)
-        .keyboardDismissToolbar()
                     }
+                    NavigationLink { WorkoutSessionView(plan: plan, existingSession: todaySession) } label: {
+                        Label(
+                            todaySession == nil ? (plan.exercises.isEmpty ? "查看恢复安排" : "开始训练") : "继续或修改训练",
+                            systemImage: todaySession == nil ? "play.fill" : "square.and.pencil"
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(.green)
                 }
                 .cardStyle()
 
@@ -2496,28 +2600,81 @@ struct TrainingWeekStrip: View {
                 ForEach(plans) { plan in
                     let isToday = plan.weekday == today
                     let isRest = plan.exercises.isEmpty
-                    VStack(spacing: 5) {
-                        Text(dayNames[plan.weekday - 1])
-                            .font(.caption.weight(.semibold))
-                        Image(systemName: isRest ? "leaf" : "dumbbell.fill")
-                            .font(.caption)
-                        Text(isToday ? "今天" : (isRest ? "恢复" : "训练"))
-                            .font(.caption2)
-                    }
-                    .foregroundStyle(isToday ? Color.white : (isRest ? Color.secondary : Color.primary))
-                    .frame(width: 54, height: 66)
-                    .background(isToday ? Color.green : Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay {
-                        if !isToday {
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color(uiColor: .separator).opacity(0.24), lineWidth: 0.5)
+                    NavigationLink { WorkoutPlanDetailView(plan: plan) } label: {
+                        VStack(spacing: 5) {
+                            Text(dayNames[plan.weekday - 1])
+                                .font(.caption.weight(.semibold))
+                            Image(systemName: isRest ? "leaf" : "dumbbell.fill")
+                                .font(.caption)
+                            Text(isToday ? "今天" : (isRest ? "恢复" : "训练"))
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(isToday ? Color.white : (isRest ? Color.secondary : Color.primary))
+                        .frame(width: 54, height: 66)
+                        .background(isToday ? Color.green : Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay {
+                            if !isToday {
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(Color(uiColor: .separator).opacity(0.24), lineWidth: 0.5)
+                            }
                         }
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("周\(dayNames[plan.weekday - 1])，\(plan.title)，点击查看计划")
                 }
             }
         }
     }
 }
+
+struct WorkoutPlanDetailView: View {
+    let plan: WorkoutPlan
+    private let dayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
+
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(plan.title)
+                        .font(.title2.weight(.bold))
+                    Text(plan.subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+            if plan.exercises.isEmpty {
+                Section("恢复安排") {
+                    Label(plan.cardio ?? "休息、轻松走路或拉伸", systemImage: "leaf.fill")
+                }
+            } else {
+                Section("力量动作 · \(plan.exercises.count) 个") {
+                    ForEach(Array(plan.exercises.enumerated()), id: \.element.id) { index, exercise in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("\(index + 1). \(exercise.name)")
+                                .font(.headline)
+                            Text(exercise.target)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.green)
+                            Text(exercise.cue)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                if let cardio = plan.cardio {
+                    Section("有氧") {
+                        Label(cardio, systemImage: "figure.walk")
+                    }
+                }
+            }
+        }
+        .navigationTitle(dayNames[min(7, max(1, plan.weekday)) - 1])
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 private struct ExerciseDraft: Identifiable {
     let id = UUID()
     let exercise: Exercise
@@ -2531,6 +2688,7 @@ struct WorkoutSessionView: View {
     @EnvironmentObject private var store: FitnessStore
     @Environment(\.dismiss) private var dismiss
     let plan: WorkoutPlan
+    let existingSession: WorkoutSession?
     @State private var drafts: [ExerciseDraft]
     @State private var durationMinutes = ""
     @State private var cardioMinutes = ""
@@ -2539,9 +2697,25 @@ struct WorkoutSessionView: View {
     @State private var effort = 7
     @State private var note = ""
 
-    init(plan: WorkoutPlan) {
+    init(plan: WorkoutPlan, existingSession: WorkoutSession? = nil) {
         self.plan = plan
-        _drafts = State(initialValue: plan.exercises.map { ExerciseDraft(exercise: $0) })
+        self.existingSession = existingSession
+        _drafts = State(initialValue: plan.exercises.map { exercise in
+            let log = existingSession?.exercises.first { $0.exerciseName == exercise.name }
+            return ExerciseDraft(
+                exercise: exercise,
+                sets: log?.sets ?? 3,
+                load: log?.loadKilograms.map { String(format: "%g", $0) } ?? "",
+                reps: log?.reps.map { String($0) } ?? "",
+                completed: log?.completed ?? false
+            )
+        })
+        _durationMinutes = State(initialValue: existingSession.map { String($0.durationMinutes) } ?? "")
+        _cardioMinutes = State(initialValue: existingSession.map { String($0.cardioMinutes) } ?? "")
+        _cardioInclinePercent = State(initialValue: existingSession?.cardioInclinePercent.map { String(format: "%g", $0) } ?? "")
+        _cardioSpeedKilometersPerHour = State(initialValue: existingSession?.cardioSpeedKilometersPerHour.map { String(format: "%g", $0) } ?? "")
+        _effort = State(initialValue: existingSession?.perceivedEffort ?? 7)
+        _note = State(initialValue: existingSession?.note ?? "")
     }
 
     private var effectiveDuration: Int { min(300, max(10, Int(durationMinutes) ?? store.profile.preferredSessionMinutes)) }
@@ -2549,13 +2723,6 @@ struct WorkoutSessionView: View {
     private var estimatedCalories: Int {
         WorkoutEnergy.estimate(bodyWeightKilograms: store.currentWeight ?? store.profile.startingWeight, totalMinutes: effectiveDuration, cardioMinutes: effectiveCardioMinutes, cardioSpeedKilometersPerHour: Double(cardioSpeedKilometersPerHour), cardioInclinePercent: Double(cardioInclinePercent), hasStrengthWork: !drafts.isEmpty)
     }
-    private var cardioDetails: String {
-        guard effectiveCardioMinutes > 0 else { return "" }
-        let incline = Double(cardioInclinePercent).map { "，坡度 \(String(format: "%.1f", $0))%" } ?? ""
-        let speed = Double(cardioSpeedKilometersPerHour).map { "，速度 \(String(format: "%.1f", $0)) km/h" } ?? ""
-        return "有氧 \(effectiveCardioMinutes) 分钟\(incline)\(speed)。"
-    }
-
     var body: some View {
         List {
             Section("训练时长与消耗") {
@@ -2589,6 +2756,9 @@ struct WorkoutSessionView: View {
                             }
                         }.padding(.vertical, 4)
                     }
+                    Text("未勾选的动作会按“未完成”保存；之后可从训练首页继续修改。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             Section("训练感受") {
@@ -2596,9 +2766,14 @@ struct WorkoutSessionView: View {
                 TextField("备注，例如：最后一组还能做 2 次", text: $note, axis: .vertical)
             }
             Section {
-                Button("完成并保存训练") {
+                Button(existingSession == nil ? "保存本次进度" : "保存修改") {
                     let logs = drafts.map { WorkoutExerciseLog(exerciseName: $0.exercise.name, target: $0.exercise.target, sets: $0.sets, loadKilograms: Double($0.load), reps: Int($0.reps), completed: $0.completed) }
-                    store.addSession(WorkoutSession(planID: plan.id, planTitle: plan.title, exercises: logs, cardioMinutes: effectiveCardioMinutes, cardioInclinePercent: Double(cardioInclinePercent), cardioSpeedKilometersPerHour: Double(cardioSpeedKilometersPerHour), estimatedCalories: estimatedCalories, perceivedEffort: effort, note: "\(cardioDetails)\(note)", durationMinutes: effectiveDuration))
+                    var session = WorkoutSession(planID: plan.id, planTitle: plan.title, exercises: logs, cardioMinutes: effectiveCardioMinutes, cardioInclinePercent: Double(cardioInclinePercent), cardioSpeedKilometersPerHour: Double(cardioSpeedKilometersPerHour), estimatedCalories: estimatedCalories, perceivedEffort: effort, note: note, durationMinutes: effectiveDuration)
+                    if let existingSession {
+                        session.id = existingSession.id
+                        session.date = existingSession.date
+                    }
+                    store.saveSession(session)
                     dismiss()
                 }.frame(maxWidth: .infinity).foregroundStyle(.green)
             }
@@ -2829,7 +3004,7 @@ struct CoachChatView: View {
                                 VStack(alignment: .leading, spacing: 12) {
                                     Label("能记住，也能执行", systemImage: "brain.head.profile")
                                         .font(.headline)
-                                    Text("AI 会读取长期记忆、最近对话和近 4 周完成情况。所有修改都会先给你确认。")
+                                    Text("AI 会先理解你的意图：明确的饮食、训练、体重和打卡会直接写入；删除、目标和计划修改会先给你确认。")
                                         .font(.subheadline)
                                         .foregroundStyle(.secondary)
                                     HStack {
@@ -2948,9 +3123,26 @@ struct CoachChatView: View {
         streamingReply = ""
         isSending = true
         errorText = nil
-        if attachedImage == nil && isWeeklyPlanAdjustmentRequest(trimmed) {
-            await prepareWeeklyPlanAdjustment(request: trimmed)
-            return
+        if attachedImage == nil {
+            do {
+                let decision = try await AIService.decideCoachTurn(
+                    question: trimmed,
+                    context: store.coachContext,
+                    configuration: store.aiConfiguration,
+                    apiKey: key
+                )
+                switch decision.route {
+                case .weeklyPlan:
+                    await prepareWeeklyPlanAdjustment(request: trimmed)
+                    return
+                case .actions:
+                    if await executePlannedActions(decision.actions) { return }
+                case .chat:
+                    break
+                }
+            } catch {
+                // 动作规划失败时仍继续普通对话，避免一次解析错误阻断聊天。
+            }
         }
         do {
             try await AIService.coachReplyStream(
@@ -2975,6 +3167,34 @@ struct CoachChatView: View {
     }
 
     @MainActor
+    private func executePlannedActions(_ actions: [CoachAction]) async -> Bool {
+        guard !actions.isEmpty else { return false }
+        var saved: [String] = []
+        var failed: [String] = []
+        let requiringConfirmation = actions.filter { !$0.canAutoExecuteFromExplicitRequest }
+
+        for action in actions where action.canAutoExecuteFromExplicitRequest {
+            do {
+                try await store.applyCoachAction(action)
+                saved.append("\(action.title)（\(action.detail)）")
+            } catch {
+                failed.append("\(action.title)：\(error.localizedDescription)")
+            }
+        }
+        pendingActions = requiringConfirmation
+
+        var replyParts: [String] = []
+        if !saved.isEmpty { replyParts.append("已实际写入：\(saved.joined(separator: "；"))。") }
+        if !requiringConfirmation.isEmpty { replyParts.append("另有 \(requiringConfirmation.count) 项修改需要你在下方确认后才会保存。") }
+        if !failed.isEmpty { replyParts.append("未能写入：\(failed.joined(separator: "；"))") }
+        store.appendChat(isUser: false, content: replyParts.joined(separator: "\n"))
+        if !failed.isEmpty { errorText = failed.joined(separator: "\n") }
+        streamingReply = ""
+        isSending = false
+        return true
+    }
+
+    @MainActor
     private func sendPreset(_ text: String) async {
         guard !isSending else { return }
         question = ""
@@ -2987,23 +3207,6 @@ struct CoachChatView: View {
         isSending = true
         store.appendChat(isUser: true, content: text)
         await prepareWeeklyPlanAdjustment(request: text)
-    }
-
-    private func isWeeklyPlanAdjustmentRequest(_ text: String) -> Bool {
-        let normalized = text.replacingOccurrences(of: " ", with: "")
-        let planKeywords = ["训练计划", "周计划", "计划里", "整周", "本周", "下周", "七天计划", "7天计划", "休息日"]
-        let weekdayKeywords = ["周一", "周二", "周三", "周四", "周五", "周六", "周日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
-        let changeKeywords = ["调整", "修改", "更改", "改成", "重排", "排一下", "重新安排", "安排", "优化", "生成", "制定", "换一套", "换成", "替换", "增加", "添加", "加上", "加个", "加", "减少", "删除", "删掉", "删", "去掉", "取消", "重新做"]
-        let refersToPlan = planKeywords.contains(where: normalized.contains)
-        let refersToSpecificTrainingDay = weekdayKeywords.contains(where: normalized.contains) && (normalized.contains("训练") || normalized.contains("练") || normalized.contains("动作") || normalized.contains("有氧"))
-        let hasChangeRequest = changeKeywords.contains(where: normalized.contains)
-        if hasChangeRequest && (refersToPlan || refersToSpecificTrainingDay) { return true }
-
-        let followUpKeywords = ["就加", "加上吧", "加进去", "按这个", "照这个", "改吧", "调整吧", "换吧", "重新做吧"]
-        let recentPlanDiscussion = store.chatMessages.suffix(6).contains { message in
-            planKeywords.contains(where: message.content.contains) || weekdayKeywords.contains(where: message.content.contains)
-        }
-        return recentPlanDiscussion && followUpKeywords.contains(where: normalized.contains)
     }
 
     @MainActor
@@ -3171,7 +3374,7 @@ struct CoachCapabilitiesView: View {
     var body: some View {
         List {
             Section {
-                Text("AI 可以读取下列本地数据，并为可写功能生成确认卡片。只有你点“确认保存”后才会真正修改。HealthKit 自动步数仍受签名权限限制。")
+                Text("AI 会按语义选择下列功能。明确的新记录会直接写入；删除、目标、提醒和计划等修改会生成确认卡片。HealthKit 自动步数仍受签名权限限制。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
