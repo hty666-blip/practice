@@ -667,12 +667,16 @@ struct CoachAction: Decodable, Identifiable {
 struct ParsedCoachReply {
     let reply: String
     let actions: [CoachAction]
+    let hadActionBlock: Bool
 
     static func parse(_ raw: String) -> ParsedCoachReply {
         let open = "<gymcoach_actions>"
         let close = "</gymcoach_actions>"
-        guard let start = raw.range(of: open), let end = raw.range(of: close, range: start.upperBound..<raw.endIndex) else {
-            return ParsedCoachReply(reply: raw.trimmingCharacters(in: .whitespacesAndNewlines), actions: [])
+        guard let start = raw.range(of: open) else {
+            return ParsedCoachReply(reply: raw.trimmingCharacters(in: .whitespacesAndNewlines), actions: [], hadActionBlock: false)
+        }
+        guard let end = raw.range(of: close, range: start.upperBound..<raw.endIndex) else {
+            return ParsedCoachReply(reply: String(raw[..<start.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines), actions: [], hadActionBlock: true)
         }
         let json = String(raw[start.upperBound..<end.lowerBound])
             .replacingOccurrences(of: "```json", with: "")
@@ -680,7 +684,7 @@ struct ParsedCoachReply {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let actions = (try? JSONDecoder().decode([CoachAction].self, from: Data(json.utf8))) ?? []
         let visible = (String(raw[..<start.lowerBound]) + String(raw[end.upperBound...])).trimmingCharacters(in: .whitespacesAndNewlines)
-        return ParsedCoachReply(reply: visible, actions: actions)
+        return ParsedCoachReply(reply: visible, actions: actions, hadActionBlock: true)
     }
 
     static func visibleText(in raw: String) -> String {
@@ -1319,6 +1323,63 @@ enum AIService {
         let weeklyPlans: [WorkoutPlan]
     }
 
+    private struct CoachActionEnvelope: Decodable {
+        let actions: [CoachAction]
+    }
+
+    private static var coachActionTool: [String: Any] {
+        let stringField: [String: Any] = ["type": "string"]
+        let integerField: [String: Any] = ["type": "integer"]
+        let numberField: [String: Any] = ["type": "number"]
+        let booleanField: [String: Any] = ["type": "boolean"]
+        let planField: [String: Any] = ["type": "object", "additionalProperties": true]
+        var properties: [String: Any] = [:]
+        properties["type"] = ["type": "string", "enum": ["record_meal", "delete_meal", "record_workout", "delete_latest_workout", "record_weight", "delete_latest_weight", "record_checkin", "update_profile", "update_nutrition_targets", "update_day_plan", "replace_weekly_plan", "regenerate_weekly_plan", "reset_weekly_plan", "add_reminder", "update_reminder", "delete_reminder", "remember", "forget_memory"]]
+        for key in ["mealType", "description", "workoutTitle", "fitnessGoal", "reminderTitle", "reminderBody", "memoryCategory", "memoryContent", "memoryKeyword"] {
+            properties[key] = stringField
+        }
+        for key in ["calories", "protein", "carbs", "fat", "waterGlasses", "steps", "workoutMinutes", "cardioMinutes", "effort", "trainingDaysPerWeek", "preferredSessionMinutes", "dailyCaloriesGoal", "dailyProteinGoal", "weekday", "reminderHour", "reminderMinute"] {
+            properties[key] = integerField
+        }
+        for key in ["weightKilograms", "waistCentimeters", "sleepHours", "cardioInclinePercent", "cardioSpeedKilometersPerHour", "goalWeightKilograms"] {
+            properties[key] = numberField
+        }
+        properties["useRecommendedNutrition"] = booleanField
+        properties["exercises"] = ["type": "array", "items": stringField]
+        properties["dayPlan"] = planField
+        properties["weeklyPlans"] = ["type": "array", "items": planField]
+
+        let actionItem: [String: Any] = [
+            "type": "object",
+            "properties": properties,
+            "required": ["type"],
+            "additionalProperties": false
+        ]
+        let actionsSchema: [String: Any] = ["type": "array", "items": actionItem]
+        let parameterProperties: [String: Any] = ["actions": actionsSchema]
+        let parameters: [String: Any] = [
+            "type": "object",
+            "properties": parameterProperties,
+            "required": ["actions"],
+            "additionalProperties": false
+        ]
+        let function: [String: Any] = [
+            "name": "apply_gymcoach_actions",
+            "description": "当用户明确要求记录、修改或删除练了么 App 中的数据时调用。一次消息包含多条记录时，在 actions 中一次返回全部动作。普通咨询不得调用。",
+            "parameters": parameters
+        ]
+        return ["type": "function", "function": function]
+    }
+
+    private static func decodeToolActions(_ arguments: String) -> [CoachAction] {
+        let cleaned = extractJSON(from: arguments)
+        guard let data = cleaned.data(using: .utf8) else { return [] }
+        if let envelope = try? JSONDecoder().decode(CoachActionEnvelope.self, from: data) {
+            return envelope.actions
+        }
+        return (try? JSONDecoder().decode([CoachAction].self, from: data)) ?? []
+    }
+
     static func refineMeal(text: String, imageData: Data?, configuration: AIConfiguration, apiKey: String) async throws -> NutritionEstimate {
         let prompt = """
         你是一位谨慎的中文健身饮食助手。根据用户提供的一餐文字和可选图片，估算热量与宏量营养素。
@@ -1340,6 +1401,42 @@ enum AIService {
         return try JSONDecoder().decode(NutritionEstimate.self, from: data)
     }
 
+    static func appearsToClaimDataChange(question: String, reply: String) -> Bool {
+        let requestHints = ["记录", "记上", "写入", "保存", "修改", "改成", "调整", "删除", "设置", "提醒", "计划", "吃了", "喝了", "练了", "体重"]
+        let claimHints = ["已记录", "记录为", "发起记录", "直接记录", "已写入", "已保存", "已修改", "已调整", "已删除", "准备记录", "准备修改"]
+        let userRequestedChange = requestHints.contains { question.localizedCaseInsensitiveContains($0) }
+        let assistantClaimedChange = claimHints.contains { reply.localizedCaseInsensitiveContains($0) }
+            || (reply.localizedCaseInsensitiveContains("发起") && reply.localizedCaseInsensitiveContains("记录"))
+        return userRequestedChange && assistantClaimedChange
+    }
+
+    static func recoverCoachActions(question: String, reply: String, context: String, configuration: AIConfiguration, apiKey: String) async throws -> [CoachAction] {
+        let prompt = """
+        上一段教练回复口头表示要修改 App，但没有返回可执行指令。请根据用户原话、回复中的估算数据和当前上下文恢复动作。
+        只输出 JSON，不要 Markdown或解释：{"actions":[{...}]}
+        只有用户明确要求改变数据时才输出动作；只是咨询时返回 {"actions":[]}。一次提到多餐时分别返回多个 record_meal。
+        可用动作：
+        \(CoachCapability.promptRegistry)
+        record_meal 必须包含 type、mealType、description、calories、protein、carbs、fat；其他动作字段沿用其语义。删除、目标、提醒和计划修改仍可返回，App 会要求用户确认。
+        当前上下文：\(context)
+        用户原话：\(question)
+        上一段回复：\(reply)
+        """
+        let response = try await send(
+            prompt: prompt,
+            imageData: nil,
+            configuration: configuration,
+            apiKey: apiKey,
+            systemPrompt: "你是 App 动作恢复器，只返回可解析的 JSON。",
+            timeoutInterval: 45,
+            maxTokens: 2600,
+            jsonMode: true
+        )
+        let data = Data(extractJSON(from: response).utf8)
+        guard let envelope = try? JSONDecoder().decode(CoachActionEnvelope.self, from: data) else { return [] }
+        return envelope.actions
+    }
+
     static func coachReplyStream(
         question: String,
         context: String,
@@ -1348,9 +1445,9 @@ enum AIService {
         apiKey: String,
         onReasoning: @escaping @MainActor (String) -> Void,
         onDelta: @escaping @MainActor (String) -> Void
-    ) async throws {
+    ) async throws -> [CoachAction] {
         let actionProtocol = """
-        你能读取用户资料、长期记忆、最近对话、饮食与营养、体重趋势、打卡、完整周计划和近 4 周训练完成率。请按整句话和最近对话理解用户意图，不依赖固定关键词；也要理解“都记上”“就这样改”等省略表达。若用户明确报告了新记录，或明确要求修改 App 数据，请在正常中文回复的最后另起一行输出唯一的机器指令：
+        你能读取用户资料、长期记忆、最近对话、饮食与营养、体重趋势、打卡、完整周计划和近 4 周训练完成率。请按整句话和最近对话理解用户意图，不依赖固定关键词；也要理解“都记上”“就这样改”等省略表达。若接口提供 apply_gymcoach_actions 工具，所有记录、修改或删除必须调用该工具，绝不能只在正文里说“已记录”“发起记录”或“准备记录”。若接口没有工具能力，才在正常中文回复的最后另起一行输出唯一的兼容机器指令：
         <gymcoach_actions>[{...}]</gymcoach_actions>
         可调用功能：
         \(CoachCapability.promptRegistry)
@@ -1377,7 +1474,7 @@ enum AIService {
         """
         let custom = configuration.customInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
         let system = "用中文回答，先给结论，再给不超过 3 条行动建议。\n\n\(actionProtocol)\(custom.isEmpty ? "" : "\n\n用户额外偏好：\(custom)")"
-        try await stream(prompt: prompt, imageData: configuration.useImageAnalysis ? imageData : nil, configuration: configuration, apiKey: apiKey, systemPrompt: system, onReasoning: onReasoning, onDelta: onDelta)
+        return try await stream(prompt: prompt, imageData: configuration.useImageAnalysis ? imageData : nil, configuration: configuration, apiKey: apiKey, systemPrompt: system, onReasoning: onReasoning, onDelta: onDelta)
     }
 
     static func testConnection(configuration: AIConfiguration, apiKey: String) async throws {
@@ -1430,7 +1527,7 @@ enum AIService {
         systemPrompt: String,
         onReasoning: @escaping @MainActor (String) -> Void,
         onDelta: @escaping @MainActor (String) -> Void
-    ) async throws {
+    ) async throws -> [CoachAction] {
         guard let url = URL(string: configuration.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)),
               url.scheme == "https" || url.scheme == "http" else {
             throw AIError.invalidEndpoint
@@ -1458,6 +1555,10 @@ enum AIService {
             ]
         ]
         let isOfficialDeepSeek = configuration.endpoint.localizedCaseInsensitiveContains("api.deepseek.com")
+        if isOfficialDeepSeek {
+            payload["tools"] = [coachActionTool]
+            payload["tool_choice"] = "auto"
+        }
         if configuration.showReasoning && isOfficialDeepSeek {
             payload.removeValue(forKey: "temperature")
             payload["thinking"] = ["type": "enabled"]
@@ -1483,6 +1584,7 @@ enum AIService {
 
         var receivedContent = false
         var fallbackLines: [String] = []
+        var toolArgumentBuffers: [Int: String] = [:]
         for try await line in bytes.lines {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
@@ -1502,6 +1604,15 @@ enum AIService {
                !reasoning.isEmpty {
                 await onReasoning(reasoning)
             }
+            if let toolCalls = delta["tool_calls"] as? [[String: Any]] {
+                for (offset, toolCall) in toolCalls.enumerated() {
+                    let index = toolCall["index"] as? Int ?? offset
+                    guard let function = toolCall["function"] as? [String: Any],
+                          let arguments = function["arguments"] as? String,
+                          !arguments.isEmpty else { continue }
+                    toolArgumentBuffers[index, default: ""] += arguments
+                }
+            }
             if let content = delta["content"] as? String, !content.isEmpty {
                 receivedContent = true
                 await onDelta(content)
@@ -1515,7 +1626,11 @@ enum AIService {
             await onDelta(responseText)
             receivedContent = true
         }
-        guard receivedContent else { throw AIError.unreadableResponse }
+        let toolActions = toolArgumentBuffers.keys.sorted().flatMap { index in
+            decodeToolActions(toolArgumentBuffers[index] ?? "")
+        }
+        guard receivedContent || !toolActions.isEmpty else { throw AIError.unreadableResponse }
+        return toolActions
     }
     private static func send(prompt: String, imageData: Data?, configuration: AIConfiguration, apiKey: String, systemPrompt: String, timeoutInterval: TimeInterval = 120, maxTokens: Int? = nil, jsonMode: Bool = false) async throws -> String {
         guard let url = URL(string: configuration.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)),
@@ -3039,7 +3154,7 @@ struct CoachChatView: View {
                                                     .foregroundStyle(.secondary)
                                             }
                                         }
-                                        Text(message.content)
+                                        Text(renderedMarkdown(message.content))
                                     }
                                         .padding(11)
                                         .background(message.isUser ? Color.green.opacity(0.18) : Color(uiColor: .secondarySystemBackground))
@@ -3143,6 +3258,13 @@ struct CoachChatView: View {
         }
     }
 
+    private func renderedMarkdown(_ text: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(text)
+    }
+
     @MainActor
     private func startSending() {
         guard requestTask == nil, !isSending else { return }
@@ -3193,7 +3315,7 @@ struct CoachChatView: View {
         backgroundLease.begin()
         defer { backgroundLease.end() }
         do {
-            try await AIService.coachReplyStream(
+            let toolActions = try await AIService.coachReplyStream(
                 question: trimmed,
                 context: conversationContext,
                 imageData: attachedImage,
@@ -3206,8 +3328,27 @@ struct CoachChatView: View {
                 streamingReply += delta
             }
             let parsed = ParsedCoachReply.parse(streamingReply)
-            if !parsed.reply.isEmpty { store.appendChat(isUser: false, content: parsed.reply, reasoning: reasoningReply) }
-            if await executePlannedActions(parsed.actions, reasoning: parsed.reply.isEmpty ? reasoningReply : nil) { return }
+            var actions = toolActions.isEmpty ? parsed.actions : toolActions
+            let claimedDataChange = parsed.hadActionBlock || AIService.appearsToClaimDataChange(question: trimmed, reply: parsed.reply)
+            if actions.isEmpty && claimedDataChange {
+                actions = (try? await AIService.recoverCoachActions(
+                    question: trimmed,
+                    reply: parsed.reply,
+                    context: conversationContext,
+                    configuration: store.aiConfiguration,
+                    apiKey: key
+                )) ?? []
+            }
+            if !actions.isEmpty {
+                if !parsed.reply.isEmpty { store.appendChat(isUser: false, content: parsed.reply, reasoning: reasoningReply) }
+                if await executePlannedActions(actions, reasoning: parsed.reply.isEmpty ? reasoningReply : nil) { return }
+            } else if claimedDataChange {
+                let failure = "AI 没有返回可执行的数据，本次没有写入。请点发送重试；只有出现“已实际写入”才代表真的保存成功。"
+                store.appendChat(isUser: false, content: failure, reasoning: reasoningReply)
+                errorText = failure
+            } else if !parsed.reply.isEmpty {
+                store.appendChat(isUser: false, content: parsed.reply, reasoning: reasoningReply)
+            }
         } catch {
             if error is CancellationError || (error as? URLError)?.code == .cancelled {
                 reasoningReply = ""
