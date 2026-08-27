@@ -243,7 +243,29 @@ struct AIConfiguration: Codable {
     var endpoint = ""
     var model = ""
     var useImageAnalysis = true
+    var showReasoning = true
     var customInstruction = ""
+
+    init(endpoint: String = "", model: String = "", useImageAnalysis: Bool = true, showReasoning: Bool = true, customInstruction: String = "") {
+        self.endpoint = endpoint
+        self.model = model
+        self.useImageAnalysis = useImageAnalysis
+        self.showReasoning = showReasoning
+        self.customInstruction = customInstruction
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case endpoint, model, useImageAnalysis, showReasoning, customInstruction
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        endpoint = try container.decodeIfPresent(String.self, forKey: .endpoint) ?? ""
+        model = try container.decodeIfPresent(String.self, forKey: .model) ?? ""
+        useImageAnalysis = try container.decodeIfPresent(Bool.self, forKey: .useImageAnalysis) ?? true
+        showReasoning = try container.decodeIfPresent(Bool.self, forKey: .showReasoning) ?? true
+        customInstruction = try container.decodeIfPresent(String.self, forKey: .customInstruction) ?? ""
+    }
 }
 
 struct ReminderItem: Codable, Identifiable, Equatable {
@@ -427,6 +449,7 @@ struct ChatMessage: Codable, Identifiable {
     var date = Date()
     var isUser: Bool
     var content: String
+    var reasoning: String?
 }
 
 struct CoachMemory: Codable, Identifiable {
@@ -666,31 +689,6 @@ struct ParsedCoachReply {
     }
 }
 
-enum CoachTurnRoute: String, Decodable, Equatable {
-    case chat
-    case actions
-    case weeklyPlan = "weekly_plan"
-}
-
-struct CoachTurnDecision: Decodable {
-    let route: CoachTurnRoute
-    let actions: [CoachAction]
-
-    private enum CodingKeys: String, CodingKey {
-        case route, actions
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        route = try container.decode(CoachTurnRoute.self, forKey: .route)
-        if route == .actions {
-            actions = (try? container.decode([CoachAction].self, forKey: .actions)) ?? []
-        } else {
-            actions = []
-        }
-    }
-}
-
 // MARK: - Local storage
 
 @MainActor
@@ -925,8 +923,9 @@ final class FitnessStore: ObservableObject {
         objectWillChange.send()
     }
 
-    func appendChat(isUser: Bool, content: String) {
-        chatMessages.append(ChatMessage(isUser: isUser, content: content))
+    func appendChat(isUser: Bool, content: String, reasoning: String? = nil) {
+        let compactReasoning = reasoning?.trimmingCharacters(in: .whitespacesAndNewlines)
+        chatMessages.append(ChatMessage(isUser: isUser, content: content, reasoning: compactReasoning?.isEmpty == true ? nil : compactReasoning))
         chatMessages = Array(chatMessages.suffix(60))
         save(chatMessages, key: Keys.chatMessages)
     }
@@ -962,14 +961,17 @@ final class FitnessStore: ObservableObject {
     }
 
     private var recentConversationContext: String {
-        let recent = chatMessages.suffix(12)
+        let recent = chatMessages.suffix(6)
         guard !recent.isEmpty else { return "无" }
-        return recent.map { "\($0.isUser ? "用户" : "教练")：\($0.content)" }.joined(separator: "\n")
+        return recent.map {
+            let compact = String($0.content.prefix(400))
+            return "\($0.isUser ? "用户" : "教练")：\(compact)"
+        }.joined(separator: "\n")
     }
 
     private var memoryContext: String {
         guard !coachMemories.isEmpty else { return "暂无长期记忆" }
-        return coachMemories.prefix(30).map { "[\($0.category)] \($0.content)" }.joined(separator: "；")
+        return coachMemories.prefix(15).map { "[\($0.category)] \(String($0.content.prefix(240)))" }.joined(separator: "；")
     }
 
     private var planContext: String {
@@ -1338,60 +1340,17 @@ enum AIService {
         return try JSONDecoder().decode(NutritionEstimate.self, from: data)
     }
 
-    static func decideCoachTurn(question: String, context: String, configuration: AIConfiguration, apiKey: String) async throws -> CoachTurnDecision {
-        let prompt = """
-        你是“练了么”App 的动作规划器。请根据语义判断用户是在普通咨询，还是要求读取后修改 App 数据。不要依赖固定关键词；结合最近对话理解“就这样改”“都记上”等省略表达。
-        只返回 JSON，不要 Markdown、解释或额外文字：
-        {"route":"chat或actions或weekly_plan","actions":[]}
-
-        路由规则：
-        - 普通问答、建议、解释、动作教学：route=chat，actions=[]。
-        - 任何新建、修改或删除饮食/训练记录/体重/打卡/个人目标/营养目标/提醒/长期记忆：route=actions，并输出一个或多个完整 action。
-        - 任何生成、添加、删除或调整某天/整周训练计划的要求：route=weekly_plan，actions=[]。不要仅因为完成率低而拒绝。
-        - 用户一次说了早餐、午餐和晚餐时，分别输出 3 个 record_meal；营养按常见份量估算。用户明确说已经吃过或要求补记时才记录，询问“吃什么”不记录。
-        - 只有用户明确要求改变数据时才生成 action；不确定时使用 chat。
-
-        可用 action：
-        \(CoachCapability.promptRegistry)
-
-        参数规则：
-        - record_meal/delete_meal：mealType 使用 breakfast/lunch/dinner/snack；记录还需 description、calories、protein、carbs、fat。
-        - record_workout：workoutTitle、workoutMinutes，可带 exercises、cardioMinutes、cardioInclinePercent、cardioSpeedKilometersPerHour、effort、description。
-        - record_weight：weightKilograms，可选 waistCentimeters。record_checkin：waterGlasses、sleepHours、steps。
-        - update_profile：fitnessGoal 仅为减脂/维持/增肌，可带 goalWeightKilograms、trainingDaysPerWeek、preferredSessionMinutes。
-        - update_nutrition_targets：自动计算用 useRecommendedNutrition=true；手动目标需 false、dailyCaloriesGoal、dailyProteinGoal。
-        - add/update/delete_reminder：使用 reminderTitle，可带 reminderBody、reminderHour、reminderMinute。
-        - remember：memoryCategory、memoryContent。forget_memory：memoryKeyword。
-        - 删除、目标、提醒等修改必须生成 action，不要在回复里假装已经完成。
-        当前数据与最近对话：
-        \(context)
-        用户本次消息：\(question)
-        """
-        let response = try await send(
-            prompt: prompt,
-            imageData: nil,
-            configuration: configuration,
-            apiKey: apiKey,
-            systemPrompt: "只返回可由 JSONDecoder 解析的 JSON。",
-            timeoutInterval: 35,
-            maxTokens: 2200,
-            jsonMode: true
-        )
-        let json = extractJSON(from: response)
-        guard let data = json.data(using: .utf8) else { throw AIError.unreadableResponse }
-        return try JSONDecoder().decode(CoachTurnDecision.self, from: data)
-    }
-
     static func coachReplyStream(
         question: String,
         context: String,
         imageData: Data?,
         configuration: AIConfiguration,
         apiKey: String,
+        onReasoning: @escaping @MainActor (String) -> Void,
         onDelta: @escaping @MainActor (String) -> Void
     ) async throws {
         let actionProtocol = """
-        你能读取用户资料、长期记忆、最近对话、饮食与营养、体重趋势、打卡、完整周计划和近 4 周训练完成率。若用户明确报告了新记录，或明确要求修改 App 数据，请在正常中文回复的最后另起一行输出唯一的机器指令：
+        你能读取用户资料、长期记忆、最近对话、饮食与营养、体重趋势、打卡、完整周计划和近 4 周训练完成率。请按整句话和最近对话理解用户意图，不依赖固定关键词；也要理解“都记上”“就这样改”等省略表达。若用户明确报告了新记录，或明确要求修改 App 数据，请在正常中文回复的最后另起一行输出唯一的机器指令：
         <gymcoach_actions>[{...}]</gymcoach_actions>
         可调用功能：
         \(CoachCapability.promptRegistry)
@@ -1407,8 +1366,9 @@ enum AIService {
         - add_reminder：reminderTitle、reminderBody、reminderHour、reminderMinute。update_reminder 用 reminderTitle 定位并提供要改的内容/时间。delete_reminder：reminderTitle。
         - remember：memoryCategory（训练偏好/饮食偏好/时间安排/身体限制/其他）和 memoryContent。forget_memory：memoryKeyword。
 
+        一句话包含多条独立记录时必须输出多个 action。例如用户一次补报早餐、午餐和晚餐，应分别生成 3 个 record_meal 并按常见份量估算；用户只是在询问吃什么时不要记录。
         当用户说“记住……”或透露稳定且未来有用的偏好、时间安排、器械限制或身体限制时，可以提出 remember；临时状态不要长期记忆。当用户要求根据执行情况调整计划时，必须先引用近 4 周完成率和近期趋势，再输出 update_day_plan 或 replace_weekly_plan，不能只给口头建议。不要因为一次漏练就补偿性加量；完成率持续偏低时优先减少动作/天数或缩短时长，持续完成且恢复良好时才小幅进阶。
-        只有把握用户是在“陈述事实”或“明确要求修改”时才输出指令；所有写入、删除和改计划都由用户在 App 内确认。估算数值时说明是估算。普通问答、医疗和药物相关对话不要输出指令。绝不声称已经保存。
+        只有把握用户是在“陈述事实”或“明确要求修改”时才输出指令。明确新增的饮食、训练、体重、打卡和长期记忆会由 App 解析后直接执行；删除、目标、提醒和训练计划变更需用户在 App 内确认。你只能说“准备记录/准备修改”，只有 App 返回的执行结果消息才能说“已实际写入”。估算数值时说明是估算。普通问答、医疗和药物相关对话不要输出指令。
         """
         let prompt = """
         你是用户的中文健身教练。给出务实、简短、可执行的减脂与训练建议；不提供药物剂量、疾病诊断或替代医生意见。
@@ -1417,7 +1377,7 @@ enum AIService {
         """
         let custom = configuration.customInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
         let system = "用中文回答，先给结论，再给不超过 3 条行动建议。\n\n\(actionProtocol)\(custom.isEmpty ? "" : "\n\n用户额外偏好：\(custom)")"
-        try await stream(prompt: prompt, imageData: configuration.useImageAnalysis ? imageData : nil, configuration: configuration, apiKey: apiKey, systemPrompt: system, onDelta: onDelta)
+        try await stream(prompt: prompt, imageData: configuration.useImageAnalysis ? imageData : nil, configuration: configuration, apiKey: apiKey, systemPrompt: system, onReasoning: onReasoning, onDelta: onDelta)
     }
 
     static func testConnection(configuration: AIConfiguration, apiKey: String) async throws {
@@ -1468,6 +1428,7 @@ enum AIService {
         configuration: AIConfiguration,
         apiKey: String,
         systemPrompt: String,
+        onReasoning: @escaping @MainActor (String) -> Void,
         onDelta: @escaping @MainActor (String) -> Void
     ) async throws {
         guard let url = URL(string: configuration.endpoint.trimmingCharacters(in: .whitespacesAndNewlines)),
@@ -1486,18 +1447,25 @@ enum AIService {
             userContent = prompt
         }
 
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "model": configuration.model,
             "temperature": 0.2,
+            "max_tokens": 4000,
             "stream": true,
             "messages": [
                 ["role": "system", "content": systemPrompt],
                 ["role": "user", "content": userContent]
             ]
         ]
+        let isOfficialDeepSeek = configuration.endpoint.localizedCaseInsensitiveContains("api.deepseek.com")
+        if configuration.showReasoning && isOfficialDeepSeek {
+            payload.removeValue(forKey: "temperature")
+            payload["thinking"] = ["type": "enabled"]
+            payload["reasoning_effort"] = "low"
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 90
+        request.timeoutInterval = 180
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
@@ -1528,11 +1496,16 @@ enum AIService {
                   let json = try? JSONSerialization.jsonObject(with: data),
                   let object = json as? [String: Any],
                   let choices = object["choices"] as? [[String: Any]],
-                  let delta = choices.first?["delta"] as? [String: Any],
-                  let content = delta["content"] as? String,
-                  !content.isEmpty else { continue }
-            receivedContent = true
-            await onDelta(content)
+                  let delta = choices.first?["delta"] as? [String: Any] else { continue }
+            if configuration.showReasoning,
+               let reasoning = delta["reasoning_content"] as? String,
+               !reasoning.isEmpty {
+                await onReasoning(reasoning)
+            }
+            if let content = delta["content"] as? String, !content.isEmpty {
+                receivedContent = true
+                await onDelta(content)
+            }
         }
 
         if !receivedContent, !fallbackLines.isEmpty {
@@ -2980,16 +2953,40 @@ struct WeightEntryView: View {
 
 // MARK: - AI coach and settings
 
+final class BackgroundRequestLease: ObservableObject {
+    private var identifier: UIBackgroundTaskIdentifier = .invalid
+
+    @MainActor
+    func begin() {
+        guard identifier == .invalid else { return }
+        identifier = UIApplication.shared.beginBackgroundTask(withName: "AI 教练回复") { [weak self] in
+            Task { @MainActor in self?.end() }
+        }
+    }
+
+    @MainActor
+    func end() {
+        guard identifier != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(identifier)
+        identifier = .invalid
+    }
+}
+
 struct CoachChatView: View {
     @EnvironmentObject private var store: FitnessStore
+    @Environment(\.scenePhase) private var scenePhase
     @State private var question = ""
     @State private var isSending = false
+    @State private var reasoningReply = ""
+    @State private var reasoningIsExpanded = true
     @State private var streamingReply = ""
     @State private var errorText: String?
     @State private var pendingActions: [CoachAction] = []
     @State private var applyingActionID: UUID?
     @State private var photoItem: PhotosPickerItem?
     @State private var photoData: Data?
+    @State private var requestTask: Task<Void, Never>?
+    @StateObject private var backgroundLease = BackgroundRequestLease()
     @FocusState private var questionIsFocused: Bool
 
     var body: some View {
@@ -3014,7 +3011,7 @@ struct CoachChatView: View {
                                     .font(.caption.weight(.medium))
                                     .foregroundStyle(.green)
                                     Button {
-                                        Task { await sendPreset("复盘我近 4 周的训练完成情况、饮食和体重趋势，并根据我的长期记忆调整整周每天的训练计划。") }
+                                        startPreset("复盘我近 4 周的训练完成情况、饮食和体重趋势，并根据我的长期记忆调整整周每天的训练计划。")
                                     } label: {
                                         Label("复盘并调整整周计划", systemImage: "wand.and.stars")
                                             .frame(maxWidth: .infinity)
@@ -3028,7 +3025,22 @@ struct CoachChatView: View {
                             ForEach(store.chatMessages) { message in
                                 HStack {
                                     if message.isUser { Spacer(minLength: 42) }
-                                    Text(message.content)
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        if !message.isUser, let reasoning = message.reasoning, !reasoning.isEmpty {
+                                            DisclosureGroup {
+                                                Text(reasoning)
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                                    .textSelection(.enabled)
+                                                    .padding(.top, 4)
+                                            } label: {
+                                                Label("思考过程", systemImage: "brain.head.profile")
+                                                    .font(.caption.weight(.semibold))
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        Text(message.content)
+                                    }
                                         .padding(11)
                                         .background(message.isUser ? Color.green.opacity(0.18) : Color(uiColor: .secondarySystemBackground))
                                         .clipShape(RoundedRectangle(cornerRadius: 14))
@@ -3037,19 +3049,33 @@ struct CoachChatView: View {
                                 .id(message.id)
                             }
                             if isSending {
-                                if streamingReply.isEmpty {
-                                    ProgressView("AI 正在组织建议…")
-                                        .id("streaming-reply")
-                                } else {
-                                    HStack {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        if !reasoningReply.isEmpty {
+                                            DisclosureGroup(isExpanded: $reasoningIsExpanded) {
+                                                Text(reasoningReply + (streamingReply.isEmpty ? "▍" : ""))
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                                    .textSelection(.enabled)
+                                                    .padding(.top, 4)
+                                            } label: {
+                                                Label(streamingReply.isEmpty ? "AI 正在思考" : "思考过程", systemImage: "brain.head.profile")
+                                                    .font(.caption.weight(.semibold))
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        if streamingReply.isEmpty {
+                                            ProgressView(reasoningReply.isEmpty ? "AI 正在组织建议…" : "正在生成正式回答…")
+                                        } else {
                                         Text(ParsedCoachReply.visibleText(in: streamingReply) + "▍")
-                                            .padding(11)
-                                            .background(Color(uiColor: .secondarySystemBackground))
-                                            .clipShape(RoundedRectangle(cornerRadius: 14))
-                                        Spacer(minLength: 42)
+                                        }
                                     }
-                                    .id("streaming-reply")
+                                    .padding(11)
+                                    .background(Color(uiColor: .secondarySystemBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                                    Spacer(minLength: 42)
                                 }
+                                .id("streaming-reply")
                             }
                             ForEach(pendingActions) { action in
                                 CoachActionCard(action: action, isApplying: applyingActionID == action.id) {
@@ -3062,11 +3088,14 @@ struct CoachChatView: View {
                         }
                         .padding()
                     }
-                    .scrollDismissesKeyboard(.interactively)
+                    .scrollDismissesKeyboard(.immediately)
                     .onChange(of: store.chatMessages.count) { _, _ in
                         if let id = store.chatMessages.last?.id { proxy.scrollTo(id, anchor: .bottom) }
                     }
                     .onChange(of: streamingReply) { _, _ in
+                        if isSending { proxy.scrollTo("streaming-reply", anchor: .bottom) }
+                    }
+                    .onChange(of: reasoningReply) { _, _ in
                         if isSending { proxy.scrollTo("streaming-reply", anchor: .bottom) }
                     }
                     .onChange(of: pendingActions.count) { _, _ in
@@ -3091,7 +3120,7 @@ struct CoachChatView: View {
                 .accessibilityLabel("AI 可用功能")
                 Menu {
                     Button {
-                        Task { await sendPreset("复盘我近 4 周的训练完成情况、饮食和体重趋势，并根据我的长期记忆调整整周每天的训练计划。") }
+                        startPreset("复盘我近 4 周的训练完成情况、饮食和体重趋势，并根据我的长期记忆调整整周每天的训练计划。")
                     } label: {
                         Label("复盘并调整周计划", systemImage: "wand.and.stars")
                     }
@@ -3106,6 +3135,41 @@ struct CoachChatView: View {
                 }
             }
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { questionIsFocused = false }
+        }
+        .onDisappear {
+            questionIsFocused = false
+        }
+    }
+
+    @MainActor
+    private func startSending() {
+        guard requestTask == nil, !isSending else { return }
+        questionIsFocused = false
+        requestTask = Task { @MainActor in
+            await send()
+            requestTask = nil
+        }
+    }
+
+    @MainActor
+    private func startPreset(_ text: String) {
+        guard requestTask == nil, !isSending else { return }
+        questionIsFocused = false
+        requestTask = Task { @MainActor in
+            await sendPreset(text)
+            requestTask = nil
+        }
+    }
+
+    @MainActor
+    private func stopSending() {
+        guard isSending else { return }
+        requestTask?.cancel()
+        backgroundLease.end()
+        questionIsFocused = false
+        errorText = "已停止本次回复。"
     }
 
     @MainActor
@@ -3114,60 +3178,60 @@ struct CoachChatView: View {
         let attachedImage = photoData
         guard !typed.isEmpty || attachedImage != nil, let key = store.aiKey else { return }
         let trimmed = typed.isEmpty ? "请识别这张图片；如果是餐食，请估算营养并准备饮食记录供我确认。" : typed
+        let conversationContext = store.coachContext
         store.appendChat(isUser: true, content: attachedImage == nil ? trimmed : "📷 \(trimmed)")
         pendingActions = []
         question = ""
         photoData = nil
         photoItem = nil
         questionIsFocused = false
+        reasoningReply = ""
+        reasoningIsExpanded = true
         streamingReply = ""
         isSending = true
         errorText = nil
-        if attachedImage == nil {
-            do {
-                let decision = try await AIService.decideCoachTurn(
-                    question: trimmed,
-                    context: store.coachContext,
-                    configuration: store.aiConfiguration,
-                    apiKey: key
-                )
-                switch decision.route {
-                case .weeklyPlan:
-                    await prepareWeeklyPlanAdjustment(request: trimmed)
-                    return
-                case .actions:
-                    if await executePlannedActions(decision.actions) { return }
-                case .chat:
-                    break
-                }
-            } catch {
-                // 动作规划失败时仍继续普通对话，避免一次解析错误阻断聊天。
-            }
-        }
+        backgroundLease.begin()
+        defer { backgroundLease.end() }
         do {
             try await AIService.coachReplyStream(
                 question: trimmed,
-                context: store.coachContext,
+                context: conversationContext,
                 imageData: attachedImage,
                 configuration: store.aiConfiguration,
-                apiKey: key
+                apiKey: key,
+                onReasoning: { delta in
+                    reasoningReply += delta
+                }
             ) { delta in
                 streamingReply += delta
             }
             let parsed = ParsedCoachReply.parse(streamingReply)
-            if !parsed.reply.isEmpty { store.appendChat(isUser: false, content: parsed.reply) }
-            pendingActions = parsed.actions
+            if !parsed.reply.isEmpty { store.appendChat(isUser: false, content: parsed.reply, reasoning: reasoningReply) }
+            if await executePlannedActions(parsed.actions, reasoning: parsed.reply.isEmpty ? reasoningReply : nil) { return }
         } catch {
+            if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                reasoningReply = ""
+                streamingReply = ""
+                isSending = false
+                return
+            }
             let partialReply = streamingReply.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !partialReply.isEmpty { store.appendChat(isUser: false, content: partialReply) }
-            errorText = error.localizedDescription
+            if !partialReply.isEmpty { store.appendChat(isUser: false, content: partialReply, reasoning: reasoningReply) }
+            if (error as? URLError)?.code == .timedOut {
+                errorText = "AI 响应超时，原消息已放回输入框，可直接重试。"
+            } else {
+                errorText = "请求失败：\(error.localizedDescription)"
+            }
+            question = trimmed
+            photoData = attachedImage
         }
+        reasoningReply = ""
         streamingReply = ""
         isSending = false
     }
 
     @MainActor
-    private func executePlannedActions(_ actions: [CoachAction]) async -> Bool {
+    private func executePlannedActions(_ actions: [CoachAction], reasoning: String? = nil) async -> Bool {
         guard !actions.isEmpty else { return false }
         var saved: [String] = []
         var failed: [String] = []
@@ -3187,8 +3251,9 @@ struct CoachChatView: View {
         if !saved.isEmpty { replyParts.append("已实际写入：\(saved.joined(separator: "；"))。") }
         if !requiringConfirmation.isEmpty { replyParts.append("另有 \(requiringConfirmation.count) 项修改需要你在下方确认后才会保存。") }
         if !failed.isEmpty { replyParts.append("未能写入：\(failed.joined(separator: "；"))") }
-        store.appendChat(isUser: false, content: replyParts.joined(separator: "\n"))
+        store.appendChat(isUser: false, content: replyParts.joined(separator: "\n"), reasoning: reasoning)
         if !failed.isEmpty { errorText = failed.joined(separator: "\n") }
+        reasoningReply = ""
         streamingReply = ""
         isSending = false
         return true
@@ -3202,10 +3267,13 @@ struct CoachChatView: View {
         photoItem = nil
         questionIsFocused = false
         pendingActions = []
+        reasoningReply = ""
         streamingReply = ""
         errorText = nil
         isSending = true
         store.appendChat(isUser: true, content: text)
+        backgroundLease.begin()
+        defer { backgroundLease.end() }
         await prepareWeeklyPlanAdjustment(request: text)
     }
 
@@ -3216,8 +3284,10 @@ struct CoachChatView: View {
             pendingActions = [CoachAction(type: .replaceWeeklyPlan, weeklyPlans: plans)]
             store.appendChat(isUser: false, content: "我已根据你的个人资料、长期记忆和近 4 周完成情况生成新的整周计划。请先查看下面的 7 天预览，点击“确认执行”后才会替换当前计划。")
         } catch {
-            errorText = error.localizedDescription
-            store.appendChat(isUser: false, content: "这次没有成功生成可保存的完整计划：\(error.localizedDescription)")
+            if !(error is CancellationError) && (error as? URLError)?.code != .cancelled {
+                errorText = error.localizedDescription
+                store.appendChat(isUser: false, content: "这次没有成功生成可保存的完整计划：\(error.localizedDescription)")
+            }
         }
         streamingReply = ""
         isSending = false
@@ -3256,36 +3326,62 @@ struct CoachChatView: View {
                 }
                 .padding(.horizontal, 16)
             }
-            HStack(alignment: .bottom, spacing: 8) {
-                PhotosPicker(selection: $photoItem, matching: .images) {
-                    Image(systemName: "photo.circle.fill")
-                        .font(.title2)
-                }
-                .frame(width: 44, height: 44)
-                .accessibilityLabel("添加图片")
-                .disabled(isSending || !store.aiConfiguration.useImageAnalysis)
-                .onChange(of: photoItem) { _, item in
-                    Task {
-                        guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
-                        photoData = ImageCompressor.compress(data)
+            if isSending {
+                HStack(spacing: 12) {
+                    ProgressView()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(!reasoningReply.isEmpty && streamingReply.isEmpty ? "AI 正在思考" : (streamingReply.isEmpty ? "正在等待 AI 回复" : "AI 正在回复"))
+                            .font(.subheadline.weight(.semibold))
+                        Text("可切到后台短暂等待，完成后会保留在对话中")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
+                    Spacer(minLength: 0)
+                    Button("停止", role: .destructive) { stopSending() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .frame(minWidth: 64, minHeight: 44)
                 }
-                TextField("输入消息…", text: $question, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1...4)
-                    .focused($questionIsFocused)
-                    .submitLabel(.send)
-                    .onSubmit { Task { await send() } }
-                Button {
-                    Task { await send() }
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill").font(.title2)
+                .padding(.horizontal, 16)
+                .frame(minHeight: 52)
+            } else {
+                HStack(alignment: .bottom, spacing: 6) {
+                    PhotosPicker(selection: $photoItem, matching: .images) {
+                        Image(systemName: "photo.circle.fill")
+                            .font(.title2)
+                    }
+                    .frame(width: 44, height: 44)
+                    .accessibilityLabel("添加图片")
+                    .disabled(!store.aiConfiguration.useImageAnalysis)
+                    .onChange(of: photoItem) { _, item in
+                        Task {
+                            guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
+                            photoData = ImageCompressor.compress(data)
+                        }
+                    }
+                    TextField("输入消息…", text: $question, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(1...4)
+                        .focused($questionIsFocused)
+                        .submitLabel(.send)
+                        .onSubmit { startSending() }
+                    if questionIsFocused {
+                        Button { questionIsFocused = false } label: {
+                            Image(systemName: "keyboard.chevron.compact.down")
+                                .font(.title3)
+                        }
+                        .frame(width: 44, height: 44)
+                        .accessibilityLabel("收起键盘")
+                    }
+                    Button { startSending() } label: {
+                        Image(systemName: "arrow.up.circle.fill").font(.title2)
+                    }
+                    .frame(width: 44, height: 44)
+                    .accessibilityLabel("发送给 AI 教练")
+                    .disabled((question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && photoData == nil) || !store.canUseAI)
                 }
-                .frame(width: 44, height: 44)
-                .accessibilityLabel("发送给 AI 教练")
-                .disabled((question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && photoData == nil) || isSending || !store.canUseAI)
+                .padding(.horizontal, 12)
             }
-            .padding(.horizontal, 12)
         }
         .padding(.top, 8)
         .padding(.bottom, 8)
@@ -3628,6 +3724,7 @@ struct AISettingsView: View {
     @State private var model = ""
     @State private var apiKey = ""
     @State private var useImageAnalysis = true
+    @State private var showReasoning = true
     @State private var instruction = ""
     @State private var message = ""
     @State private var isTesting = false
@@ -3642,6 +3739,14 @@ struct AISettingsView: View {
                 SecureField("API Key（留空则保留当前 Key）", text: $apiKey)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                 Menu("填入常见示例") {
+                    Button("DeepSeek V4 Flash") {
+                        endpoint = "https://api.deepseek.com/chat/completions"
+                        model = "deepseek-v4-flash"
+                    }
+                    Button("DeepSeek V4 Pro") {
+                        endpoint = "https://api.deepseek.com/chat/completions"
+                        model = "deepseek-v4-pro"
+                    }
                     Button("OpenAI Chat Completions") {
                         endpoint = "https://api.openai.com/v1/chat/completions"
                         if model.isEmpty { model = "gpt-4o-mini" }
@@ -3654,6 +3759,10 @@ struct AISettingsView: View {
             }
             Section("AI 行为") {
                 Toggle("餐食分析时发送图片", isOn: $useImageAnalysis)
+                Toggle("显示支持模型的思考过程", isOn: $showReasoning)
+                Text("DeepSeek V4 会以低强度思考并流式显示；其他兼容接口只有返回 reasoning_content 时才会显示。关闭可缩短等待。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 TextEditor(text: $instruction)
                     .frame(minHeight: 88)
                 Text("上方可填写额外教练风格要求，例如“语气直接、每次只给三条建议”。")
@@ -3675,7 +3784,7 @@ struct AISettingsView: View {
             }
             Section {
                 Button("保存 AI 配置") {
-                    store.saveAI(configuration: AIConfiguration(endpoint: endpoint.trimmingCharacters(in: .whitespacesAndNewlines), model: model.trimmingCharacters(in: .whitespacesAndNewlines), useImageAnalysis: useImageAnalysis, customInstruction: instruction.trimmingCharacters(in: .whitespacesAndNewlines)), apiKey: apiKey)
+                    store.saveAI(configuration: AIConfiguration(endpoint: endpoint.trimmingCharacters(in: .whitespacesAndNewlines), model: model.trimmingCharacters(in: .whitespacesAndNewlines), useImageAnalysis: useImageAnalysis, showReasoning: showReasoning, customInstruction: instruction.trimmingCharacters(in: .whitespacesAndNewlines)), apiKey: apiKey)
                     apiKey = ""
                     message = store.canUseAI ? "已保存。饮食记录和 AI 教练现在会使用你的接口。" : "已保存地址和模型；还需要填写 API Key 才能调用。"
                 }
@@ -3697,6 +3806,7 @@ struct AISettingsView: View {
             endpoint = store.aiConfiguration.endpoint
             model = store.aiConfiguration.model
             useImageAnalysis = store.aiConfiguration.useImageAnalysis
+            showReasoning = store.aiConfiguration.showReasoning
             instruction = store.aiConfiguration.customInstruction
         }
     }
