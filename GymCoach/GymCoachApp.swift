@@ -355,6 +355,24 @@ struct WorkoutPlan: Codable, Identifiable {
 }
 
 extension WorkoutPlan {
+    /// App 内部使用 Apple Calendar 的编号：周日=1，周一=2，…，周六=7。
+    static func calendarWeekdaysMentioned(in text: String) -> [Int] {
+        let mappings: [(String, Int)] = [
+            ("星期日", 1), ("周日", 1),
+            ("星期一", 2), ("周一", 2),
+            ("星期二", 3), ("周二", 3),
+            ("星期三", 4), ("周三", 4),
+            ("星期四", 5), ("周四", 5),
+            ("星期五", 6), ("周五", 6),
+            ("星期六", 7), ("周六", 7)
+        ]
+        return mappings.compactMap { label, weekday in
+            text.range(of: label).map { ($0.lowerBound, weekday) }
+        }
+        .sorted { $0.0 < $1.0 }
+        .map(\.1)
+    }
+
     static func preferredTrainingWeekdays(for profile: FitnessProfile) -> [Int] {
         switch profile.trainingDaysPerWeek {
         case 1: return [3]
@@ -860,6 +878,10 @@ final class FitnessStore: ObservableObject {
         sessions.append(session)
         sessions.sort { $0.date > $1.date }
         save(sessions, key: Keys.sessions)
+    }
+
+    func session(on date: Date = Date()) -> WorkoutSession? {
+        sessions.first { Calendar.current.isDate($0.date, inSameDayAs: date) }
     }
 
     func saveSession(_ session: WorkoutSession) {
@@ -1458,7 +1480,7 @@ enum AIService {
         - record_weight：weightKilograms，可选 waistCentimeters。record_checkin：waterGlasses、sleepHours、steps。
         - update_profile：fitnessGoal 仅为减脂/维持/增肌，可选 goalWeightKilograms、trainingDaysPerWeek、preferredSessionMinutes。
         - update_nutrition_targets：自动计算用 useRecommendedNutrition=true；手动目标用 false 并同时提供 dailyCaloriesGoal、dailyProteinGoal。
-        - update_day_plan：提供 weekday 1...7 和完整 dayPlan，dayPlan 格式为 {"id":"adjusted","weekday":2,"title":"标题","subtitle":"调整原因","exercises":[{"name":"动作","target":"组数 × 次数","cue":"提示"}],"cardio":"有氧或 null"}。
+        - update_day_plan：提供 weekday 1...7 和完整 dayPlan，dayPlan 格式为 {"id":"adjusted","weekday":2,"title":"标题","subtitle":"调整原因","exercises":[{"name":"动作","target":"组数 × 次数","cue":"提示"}],"cardio":"有氧或 null"}。weekday 是 Apple Calendar 编号，严格固定为周日=1、周一=2、周二=3、周三=4、周四=5、周五=6、周六=7；绝不能按“周一=1”理解。用户只点名改某一天时，必须使用 update_day_plan，action.weekday 与 dayPlan.weekday 都必须等于该天。
         - replace_weekly_plan：提供 weeklyPlans，必须恰好有 weekday 1...7 七项，单项格式同 dayPlan；如改变训练频率，同时提供 trainingDaysPerWeek。要遵守用户可训练日期；恢复日 exercises=[]。reset_weekly_plan 无参数。
         - add_reminder：reminderTitle、reminderBody、reminderHour、reminderMinute。update_reminder 用 reminderTitle 定位并提供要改的内容/时间。delete_reminder：reminderTitle。
         - remember：memoryCategory（训练偏好/饮食偏好/时间安排/身体限制/其他）和 memoryContent。forget_memory：memoryKeyword。
@@ -1832,6 +1854,8 @@ struct TodayView: View {
         max(store.nutritionTargets.calories - store.todayNutrition.calories, 0)
     }
 
+    private var todaySession: WorkoutSession? { store.session() }
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 24) {
@@ -1912,8 +1936,8 @@ struct TodayView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    NavigationLink { WorkoutSessionView(plan: store.todayPlan) } label: {
-                        Label("开始训练", systemImage: "play.fill")
+                    NavigationLink { WorkoutSessionView(plan: store.todayPlan, existingSession: todaySession) } label: {
+                        Label(todaySession == nil ? "开始训练" : "继续或修改训练", systemImage: todaySession == nil ? "play.fill" : "square.and.pencil")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
@@ -2528,7 +2552,7 @@ struct WorkoutHomeView: View {
 
     private var plan: WorkoutPlan { store.todayPlan }
     private var todaySession: WorkoutSession? {
-        store.sessions.first { Calendar.current.isDateInToday($0.date) }
+        store.session()
     }
 
     private var completedToday: Bool { todaySession != nil }
@@ -3339,6 +3363,7 @@ struct CoachChatView: View {
                     apiKey: key
                 )) ?? []
             }
+            actions = alignWeekdayActions(actions, toUserRequest: trimmed)
             if !actions.isEmpty {
                 if !parsed.reply.isEmpty { store.appendChat(isUser: false, content: parsed.reply, reasoning: reasoningReply) }
                 if await executePlannedActions(actions, reasoning: parsed.reply.isEmpty ? reasoningReply : nil) { return }
@@ -3369,6 +3394,24 @@ struct CoachChatView: View {
         reasoningReply = ""
         streamingReply = ""
         isSending = false
+    }
+
+    private func alignWeekdayActions(_ actions: [CoachAction], toUserRequest request: String) -> [CoachAction] {
+        let mentionedWeekdays = WorkoutPlan.calendarWeekdaysMentioned(in: request)
+        guard !mentionedWeekdays.isEmpty else { return actions }
+        var nextMentionIndex = 0
+        return actions.map { original in
+            guard original.type == .updateDayPlan else { return original }
+            var action = original
+            let intendedWeekday = mentionedWeekdays[min(nextMentionIndex, mentionedWeekdays.count - 1)]
+            nextMentionIndex += 1
+            action.weekday = intendedWeekday
+            if var dayPlan = action.dayPlan {
+                dayPlan.weekday = intendedWeekday
+                action.dayPlan = dayPlan
+            }
+            return action
+        }
     }
 
     @MainActor
